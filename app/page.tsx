@@ -20,7 +20,7 @@ type CartItem = {
   quantity: number;
 };
 
-type PaymentMethod = "card" | "cash";
+type PaymentMethod = "card" | "cash" | "transfer";
 
 type SaleLine = {
   productId: string;
@@ -76,6 +76,7 @@ const timeFormatter = new Intl.DateTimeFormat("ko-KR", {
 const paymentLabels: Record<PaymentMethod, string> = {
   card: "카드",
   cash: "현금",
+  transfer: "계좌이체",
 };
 
 function makeId(prefix: string) {
@@ -258,11 +259,15 @@ export default function Home() {
   const todayCashTotal = activeSales
     .filter((sale) => dateKey(new Date(sale.soldAt)) === dateKey(new Date()) && (sale.paymentMethod ?? "card") === "cash")
     .reduce((sum, sale) => sum + sale.total, 0);
+  const todayTransferTotal = activeSales
+    .filter((sale) => dateKey(new Date(sale.soldAt)) === dateKey(new Date()) && (sale.paymentMethod ?? "card") === "transfer")
+    .reduce((sum, sale) => sum + sale.total, 0);
 
   const selectedMonthSales = activeSales.filter((sale) => monthKey(new Date(sale.soldAt)) === selectedMonth);
   const monthlyTotal = selectedMonthSales.reduce((sum, sale) => sum + sale.total, 0);
   const monthlyCardTotal = selectedMonthSales.filter((sale) => (sale.paymentMethod ?? "card") === "card").reduce((sum, sale) => sum + sale.total, 0);
   const monthlyCashTotal = selectedMonthSales.filter((sale) => (sale.paymentMethod ?? "card") === "cash").reduce((sum, sale) => sum + sale.total, 0);
+  const monthlyTransferTotal = selectedMonthSales.filter((sale) => (sale.paymentMethod ?? "card") === "transfer").reduce((sum, sale) => sum + sale.total, 0);
   const rankMonthSales = activeSales.filter((sale) => monthKey(new Date(sale.soldAt)) === selectedRankMonth);
   const selectedRankWeekDate = new Date(selectedRankDate);
   const selectedWeekStart = startOfWeek(selectedRankWeekDate);
@@ -276,12 +281,14 @@ export default function Home() {
   const weeklyRank = useMemo(() => rankSales(selectedWeekSales), [selectedWeekSales]);
 
   const dailyTotals = useMemo(() => {
-    const map = new Map<string, { total: number; card: number; cash: number }>();
+    const map = new Map<string, { total: number; card: number; cash: number; transfer: number }>();
     selectedMonthSales.forEach((sale) => {
       const key = dateKey(new Date(sale.soldAt));
-      const current = map.get(key) ?? { total: 0, card: 0, cash: 0 };
+      const current = map.get(key) ?? { total: 0, card: 0, cash: 0, transfer: 0 };
       current.total += sale.total;
-      if ((sale.paymentMethod ?? "card") === "cash") {
+      if ((sale.paymentMethod ?? "card") === "transfer") {
+        current.transfer += sale.total;
+      } else if ((sale.paymentMethod ?? "card") === "cash") {
         current.cash += sale.total;
       } else {
         current.card += sale.total;
@@ -417,13 +424,15 @@ export default function Home() {
 
     rows.push([]);
     rows.push(["일별 정산 요약"]);
-    rows.push(["날짜", "카드 매출", "현금 매출", "총 매출"]);
-    const settlement = new Map<string, { card: number; cash: number; total: number }>();
+    rows.push(["날짜", "카드 매출", "현금 매출", "계좌이체 매출", "총 매출"]);
+    const settlement = new Map<string, { card: number; cash: number; transfer: number; total: number }>();
     activeSales.forEach((sale) => {
       const key = dateKey(new Date(sale.soldAt));
-      const current = settlement.get(key) ?? { card: 0, cash: 0, total: 0 };
+      const current = settlement.get(key) ?? { card: 0, cash: 0, transfer: 0, total: 0 };
       current.total += sale.total;
-      if ((sale.paymentMethod ?? "card") === "cash") {
+      if ((sale.paymentMethod ?? "card") === "transfer") {
+        current.transfer += sale.total;
+      } else if ((sale.paymentMethod ?? "card") === "cash") {
         current.cash += sale.total;
       } else {
         current.card += sale.total;
@@ -433,7 +442,7 @@ export default function Home() {
     [...settlement.entries()]
       .sort(([a], [b]) => a.localeCompare(b))
       .forEach(([date, amount]) => {
-        rows.push([date, amount.card, amount.cash, amount.total]);
+        rows.push([date, amount.card, amount.cash, amount.transfer, amount.total]);
       });
 
     rows.push([]);
@@ -476,7 +485,7 @@ export default function Home() {
     ...Array.from({ length: daysInMonth }, (_, index) => {
       const day = index + 1;
       const key = `${selectedMonth}-${String(day).padStart(2, "0")}`;
-      return { type: "day", key, day, amount: dailyTotals.get(key) ?? { total: 0, card: 0, cash: 0 } };
+      return { type: "day", key, day, amount: dailyTotals.get(key) ?? { total: 0, card: 0, cash: 0, transfer: 0 } };
     }),
   ];
 
@@ -491,7 +500,7 @@ export default function Home() {
           <div>
             <span>오늘 매출</span>
             <strong>{money(todayTotal)}</strong>
-            <small>카드 {money(todayCardTotal)} · 현금 {money(todayCashTotal)}</small>
+            <small>카드 {money(todayCardTotal)} · 현금 {money(todayCashTotal)} · 이체 {money(todayTransferTotal)}</small>
           </div>
           <div>
             <span>등록 상품</span>
@@ -596,6 +605,9 @@ export default function Home() {
               </button>
               <button className={paymentMethod === "cash" ? "active" : ""} onClick={() => setPaymentMethod("cash")} type="button">
                 현금 결제
+              </button>
+              <button className={paymentMethod === "transfer" ? "active" : ""} onClick={() => setPaymentMethod("transfer")} type="button">
+                계좌이체
               </button>
             </div>
             <button className="primary-button" onClick={checkout} type="button">
@@ -726,7 +738,7 @@ export default function Home() {
           <div className="monthly-total">
             <div>
               <span>월별 매출</span>
-              <small>카드 {money(monthlyCardTotal)} · 현금 {money(monthlyCashTotal)}</small>
+              <small>카드 {money(monthlyCardTotal)} · 현금 {money(monthlyCashTotal)} · 이체 {money(monthlyTransferTotal)}</small>
             </div>
             <strong>{money(monthlyTotal)}</strong>
           </div>
@@ -747,6 +759,7 @@ export default function Home() {
                     <div className="day-payment-breakdown">
                       <em>카드 {money(cell.amount.card)}</em>
                       <em>현금 {money(cell.amount.cash)}</em>
+                      <em>이체 {money(cell.amount.transfer)}</em>
                     </div>
                   ) : null}
                   <small>{weekdayFormatter.format(new Date(cell.key))}</small>

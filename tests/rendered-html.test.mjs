@@ -33,6 +33,9 @@ test("server-renders the POS app shell", async () => {
   assert.match(html, /매장 판매 관리/);
   assert.match(html, /상품 선택/);
   assert.match(html, /계산 완료/);
+  assert.match(html, /카드 결제/);
+  assert.match(html, /현금 결제/);
+  assert.match(html, /계좌이체/);
   assert.match(html, /최근 계산 내역/);
   assert.match(html, /정산 달력/);
   assert.match(html, /월별 판매 순위/);
@@ -59,6 +62,8 @@ test("keeps starter preview code out of the finished app", async () => {
   assert.match(page, /selectedRankMonth/);
   assert.match(page, /selectedRankDate/);
   assert.match(page, /selectedWeekLabel/);
+  assert.match(page, /transfer/);
+  assert.match(page, /계좌이체 매출/);
   assert.match(page, /cancelSale/);
   assert.match(page, /cancelledAt/);
   assert.match(page, /downloadExcel/);
