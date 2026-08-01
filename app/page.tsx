@@ -20,6 +20,8 @@ type CartItem = {
   quantity: number;
 };
 
+type PaymentMethod = "card" | "cash";
+
 type SaleLine = {
   productId: string;
   name: string;
@@ -33,6 +35,7 @@ type Sale = {
   id: string;
   soldAt: string;
   cancelledAt?: string;
+  paymentMethod?: PaymentMethod;
   lines: SaleLine[];
   total: number;
 };
@@ -44,6 +47,7 @@ type RankItem = {
 };
 
 const STORAGE_KEY = "store-pos-v1";
+const STORAGE_BACKUP_KEY = "store-pos-v1-backup";
 const MAX_CATEGORIES = 10;
 const colors = ["#2563eb", "#16a34a", "#dc2626", "#9333ea", "#ea580c", "#0891b2", "#be123c", "#4f46e5", "#0f766e", "#a16207"];
 
@@ -68,6 +72,11 @@ const timeFormatter = new Intl.DateTimeFormat("ko-KR", {
   hour: "2-digit",
   minute: "2-digit",
 });
+
+const paymentLabels: Record<PaymentMethod, string> = {
+  card: "카드",
+  cash: "현금",
+};
 
 function makeId(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -122,6 +131,42 @@ function rankSales(sales: Sale[]) {
   return [...map.values()].sort((a, b) => b.quantity - a.quantity || b.total - a.total).slice(0, 5);
 }
 
+function normalizeSales(sales: Sale[] = []) {
+  return sales.map((sale) => ({
+    ...sale,
+    paymentMethod: sale.paymentMethod ?? "card",
+  }));
+}
+
+function readStoredData() {
+  if (typeof window === "undefined") return null;
+  const stored = localStorage.getItem(STORAGE_KEY) ?? localStorage.getItem(STORAGE_BACKUP_KEY);
+  if (!stored) return null;
+
+  try {
+    const parsed = JSON.parse(stored) as { categories?: Category[]; products?: Product[]; sales?: Sale[] };
+    return {
+      categories: parsed.categories?.length ? parsed.categories.slice(0, MAX_CATEGORIES) : seedCategories,
+      products: parsed.products?.length ? parsed.products : seedProducts,
+      sales: normalizeSales(parsed.sales ?? []),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredData(categories: Category[], products: Product[], sales: Sale[]) {
+  if (typeof window === "undefined") return false;
+  try {
+    const payload = JSON.stringify({ categories, products, sales });
+    localStorage.setItem(STORAGE_KEY, payload);
+    localStorage.setItem(STORAGE_BACKUP_KEY, payload);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function escapeCell(value: string | number) {
   return String(value).replace(/[&<>]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[char] ?? char));
 }
@@ -143,6 +188,7 @@ export default function Home() {
   const [products, setProducts] = useState<Product[]>(seedProducts);
   const [sales, setSales] = useState<Sale[]>([]);
   const [cart, setCart] = useState<CartItem[]>([]);
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("card");
   const [activeCategory, setActiveCategory] = useState("all");
   const [selectedMonth, setSelectedMonth] = useState(monthKey(new Date()));
   const [selectedRankMonth, setSelectedRankMonth] = useState(monthKey(new Date()));
@@ -153,24 +199,26 @@ export default function Home() {
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    const saved = localStorage.getItem(STORAGE_KEY);
+    const saved = readStoredData();
     if (saved) {
-      const parsed = JSON.parse(saved) as { categories: Category[]; products: Product[]; sales: Sale[] };
-      const savedCategories = parsed.categories?.length ? parsed.categories.slice(0, MAX_CATEGORIES) : seedCategories;
-      setCategories(savedCategories);
-      setProducts(parsed.products?.length ? parsed.products : seedProducts);
-      setSales(parsed.sales ?? []);
+      setCategories(saved.categories);
+      setProducts(saved.products);
+      setSales(saved.sales);
       setProductForm((current) => ({
         ...current,
-        categoryId: savedCategories[0]?.id ?? seedCategories[0].id,
+        categoryId: saved.categories[0]?.id ?? seedCategories[0].id,
       }));
+      setNotice("저장된 매장 데이터를 불러왔습니다.");
     }
     setReady(true);
   }, []);
 
   useEffect(() => {
     if (!ready) return;
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ categories, products, sales }));
+    const saved = writeStoredData(categories, products, sales);
+    if (!saved) {
+      setNotice("브라우저 저장소를 사용할 수 없습니다. 시크릿 모드나 저장소 차단 설정을 확인해 주세요.");
+    }
   }, [categories, products, sales, ready]);
 
   const activeSales = useMemo(() => sales.filter((sale) => !sale.cancelledAt), [sales]);
@@ -204,9 +252,17 @@ export default function Home() {
   const todayTotal = activeSales
     .filter((sale) => dateKey(new Date(sale.soldAt)) === dateKey(new Date()))
     .reduce((sum, sale) => sum + sale.total, 0);
+  const todayCardTotal = activeSales
+    .filter((sale) => dateKey(new Date(sale.soldAt)) === dateKey(new Date()) && (sale.paymentMethod ?? "card") === "card")
+    .reduce((sum, sale) => sum + sale.total, 0);
+  const todayCashTotal = activeSales
+    .filter((sale) => dateKey(new Date(sale.soldAt)) === dateKey(new Date()) && (sale.paymentMethod ?? "card") === "cash")
+    .reduce((sum, sale) => sum + sale.total, 0);
 
   const selectedMonthSales = activeSales.filter((sale) => monthKey(new Date(sale.soldAt)) === selectedMonth);
   const monthlyTotal = selectedMonthSales.reduce((sum, sale) => sum + sale.total, 0);
+  const monthlyCardTotal = selectedMonthSales.filter((sale) => (sale.paymentMethod ?? "card") === "card").reduce((sum, sale) => sum + sale.total, 0);
+  const monthlyCashTotal = selectedMonthSales.filter((sale) => (sale.paymentMethod ?? "card") === "cash").reduce((sum, sale) => sum + sale.total, 0);
   const rankMonthSales = activeSales.filter((sale) => monthKey(new Date(sale.soldAt)) === selectedRankMonth);
   const selectedRankWeekDate = new Date(selectedRankDate);
   const selectedWeekStart = startOfWeek(selectedRankWeekDate);
@@ -220,10 +276,17 @@ export default function Home() {
   const weeklyRank = useMemo(() => rankSales(selectedWeekSales), [selectedWeekSales]);
 
   const dailyTotals = useMemo(() => {
-    const map = new Map<string, number>();
+    const map = new Map<string, { total: number; card: number; cash: number }>();
     selectedMonthSales.forEach((sale) => {
       const key = dateKey(new Date(sale.soldAt));
-      map.set(key, (map.get(key) ?? 0) + sale.total);
+      const current = map.get(key) ?? { total: 0, card: 0, cash: 0 };
+      current.total += sale.total;
+      if ((sale.paymentMethod ?? "card") === "cash") {
+        current.cash += sale.total;
+      } else {
+        current.card += sale.total;
+      }
+      map.set(key, current);
     });
     return map;
   }, [selectedMonthSales]);
@@ -262,12 +325,13 @@ export default function Home() {
     const sale: Sale = {
       id: makeId("sale"),
       soldAt: new Date().toISOString(),
+      paymentMethod,
       lines,
       total: lines.reduce((sum, line) => sum + line.total, 0),
     };
     setSales((entries) => [sale, ...entries]);
     setCart([]);
-    setNotice(`${money(sale.total)} 결제가 기록되었습니다. 잘못 눌렀다면 최근 계산 내역에서 취소하세요.`);
+    setNotice(`${paymentLabels[paymentMethod]} ${money(sale.total)} 결제가 기록되었습니다. 잘못 눌렀다면 최근 계산 내역에서 취소하세요.`);
   }
 
   function cancelSale(saleId: string) {
@@ -325,30 +389,67 @@ export default function Home() {
   }
 
   function exportSales() {
-    const rows: Array<Array<string | number>> = [["구분", "기간", "상품명", "카테고리", "판매수량", "판매금액"]];
-    const grouped = new Map<string, { scope: string; period: string; line: SaleLine }>();
+    const rows: Array<Array<string | number>> = [["판매 집계"], ["구분", "기간", "결제수단", "상품명", "카테고리", "판매수량", "판매금액"]];
+    const grouped = new Map<string, { scope: string; period: string; method: PaymentMethod; line: SaleLine }>();
     activeSales.forEach((sale) => {
       const soldDate = new Date(sale.soldAt);
+      const method = sale.paymentMethod ?? "card";
       sale.lines.forEach((line) => {
         [
           ["일별", dateKey(soldDate)],
           ["주별", getWeekKey(soldDate)],
           ["월별", monthKey(soldDate)],
         ].forEach(([scope, period]) => {
-          const key = `${scope}-${period}-${line.productId}`;
+          const key = `${scope}-${period}-${method}-${line.productId}`;
           const current = grouped.get(key);
           if (current) {
             current.line.quantity += line.quantity;
             current.line.total += line.total;
           } else {
-            grouped.set(key, { scope, period, line: { ...line } });
+            grouped.set(key, { scope, period, method, line: { ...line } });
           }
         });
       });
     });
     grouped.forEach((entry) => {
-      rows.push([entry.scope, entry.period, entry.line.name, entry.line.categoryName, entry.line.quantity, entry.line.total]);
+      rows.push([entry.scope, entry.period, paymentLabels[entry.method], entry.line.name, entry.line.categoryName, entry.line.quantity, entry.line.total]);
     });
+
+    rows.push([]);
+    rows.push(["일별 정산 요약"]);
+    rows.push(["날짜", "카드 매출", "현금 매출", "총 매출"]);
+    const settlement = new Map<string, { card: number; cash: number; total: number }>();
+    activeSales.forEach((sale) => {
+      const key = dateKey(new Date(sale.soldAt));
+      const current = settlement.get(key) ?? { card: 0, cash: 0, total: 0 };
+      current.total += sale.total;
+      if ((sale.paymentMethod ?? "card") === "cash") {
+        current.cash += sale.total;
+      } else {
+        current.card += sale.total;
+      }
+      settlement.set(key, current);
+    });
+    [...settlement.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .forEach(([date, amount]) => {
+        rows.push([date, amount.card, amount.cash, amount.total]);
+      });
+
+    rows.push([]);
+    rows.push(["취소 내역"]);
+    rows.push(["취소일시", "판매일시", "결제수단", "판매금액", "상품"]);
+    sales
+      .filter((sale) => sale.cancelledAt)
+      .forEach((sale) => {
+        rows.push([
+          sale.cancelledAt ?? "",
+          sale.soldAt,
+          paymentLabels[sale.paymentMethod ?? "card"],
+          sale.total,
+          sale.lines.map((line) => `${line.name} ${line.quantity}개`).join(", "),
+        ]);
+      });
     downloadExcel(`판매집계_${dateKey(new Date())}.xls`, rows);
   }
 
@@ -375,7 +476,7 @@ export default function Home() {
     ...Array.from({ length: daysInMonth }, (_, index) => {
       const day = index + 1;
       const key = `${selectedMonth}-${String(day).padStart(2, "0")}`;
-      return { type: "day", key, day, total: dailyTotals.get(key) ?? 0 };
+      return { type: "day", key, day, amount: dailyTotals.get(key) ?? { total: 0, card: 0, cash: 0 } };
     }),
   ];
 
@@ -390,6 +491,7 @@ export default function Home() {
           <div>
             <span>오늘 매출</span>
             <strong>{money(todayTotal)}</strong>
+            <small>카드 {money(todayCardTotal)} · 현금 {money(todayCashTotal)}</small>
           </div>
           <div>
             <span>등록 상품</span>
@@ -488,8 +590,16 @@ export default function Home() {
           <div className="checkout-box">
             <span>합계</span>
             <strong>{money(cartTotal)}</strong>
+            <div className="payment-toggle" aria-label="결제수단 선택">
+              <button className={paymentMethod === "card" ? "active" : ""} onClick={() => setPaymentMethod("card")} type="button">
+                카드 결제
+              </button>
+              <button className={paymentMethod === "cash" ? "active" : ""} onClick={() => setPaymentMethod("cash")} type="button">
+                현금 결제
+              </button>
+            </div>
             <button className="primary-button" onClick={checkout} type="button">
-              계산 완료
+              {paymentLabels[paymentMethod]} 계산 완료
             </button>
           </div>
 
@@ -508,7 +618,7 @@ export default function Home() {
                   <div className={sale.cancelledAt ? "sale-row cancelled" : "sale-row"} key={sale.id}>
                     <div>
                       <strong>{money(sale.total)}</strong>
-                      <span>{timeFormatter.format(new Date(sale.soldAt))}</span>
+                      <span>{paymentLabels[sale.paymentMethod ?? "card"]} · {timeFormatter.format(new Date(sale.soldAt))}</span>
                       <small>{sale.lines.map((line) => `${line.name} ${line.quantity}개`).join(", ")}</small>
                     </div>
                     {sale.cancelledAt ? (
@@ -614,7 +724,10 @@ export default function Home() {
             <input aria-label="정산 월" type="month" value={selectedMonth} onChange={(event) => setSelectedMonth(event.target.value)} />
           </div>
           <div className="monthly-total">
-            <span>월별 매출</span>
+            <div>
+              <span>월별 매출</span>
+              <small>카드 {money(monthlyCardTotal)} · 현금 {money(monthlyCashTotal)}</small>
+            </div>
             <strong>{money(monthlyTotal)}</strong>
           </div>
           <div className="calendar-weekdays">
@@ -627,9 +740,15 @@ export default function Home() {
               cell.type === "blank" ? (
                 <div className="calendar-day blank" key={cell.key} />
               ) : (
-                <div className={cell.total ? "calendar-day has-sale" : "calendar-day"} key={cell.key}>
+                <div className={cell.amount.total ? "calendar-day has-sale" : "calendar-day"} key={cell.key}>
                   <span>{cell.day}</span>
-                  <strong>{cell.total ? money(cell.total) : ""}</strong>
+                  <strong>{cell.amount.total ? money(cell.amount.total) : ""}</strong>
+                  {cell.amount.total ? (
+                    <div className="day-payment-breakdown">
+                      <em>카드 {money(cell.amount.card)}</em>
+                      <em>현금 {money(cell.amount.cash)}</em>
+                    </div>
+                  ) : null}
                   <small>{weekdayFormatter.format(new Date(cell.key))}</small>
                 </div>
               ),

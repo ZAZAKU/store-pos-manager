@@ -111,14 +111,23 @@ h2 {
 }
 
 .summary-strip span,
+.summary-strip small,
 .checkout-box span,
 .monthly-total span,
+.monthly-total small,
 .cart-line span,
 .product-tile small,
 .compact-list small,
 .rank-list small {
   color: var(--muted);
   font-size: 13px;
+}
+
+.summary-strip small,
+.monthly-total small {
+  display: block;
+  margin-top: 4px;
+  white-space: nowrap;
 }
 
 .summary-strip strong,
@@ -311,6 +320,28 @@ h2 {
   margin-top: 16px;
   padding-top: 16px;
   border-top: 1px solid var(--line);
+}
+
+.payment-toggle {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.payment-toggle button {
+  min-height: 46px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #ffffff;
+  color: #334155;
+  font-weight: 900;
+}
+
+.payment-toggle button.active {
+  border-color: var(--primary);
+  background: #ccfbf1;
+  color: var(--primary-dark);
+  box-shadow: inset 0 0 0 1px var(--primary);
 }
 
 .history-box {
@@ -575,6 +606,19 @@ select {
   padding: 14px;
   border-radius: 8px;
   background: #ecfdf5;
+}
+
+.day-payment-breakdown {
+  display: grid;
+  gap: 2px;
+  margin-top: 6px;
+}
+
+.day-payment-breakdown em {
+  color: #475569;
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 800;
 }
 
 .calendar-weekdays,
