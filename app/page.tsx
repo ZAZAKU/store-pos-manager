@@ -46,6 +46,14 @@ type RankItem = {
   total: number;
 };
 
+type StoredData = {
+  categories?: Category[];
+  products?: Product[];
+  sales?: Sale[];
+  activeCategory?: string;
+  updatedAt?: string;
+};
+
 const STORAGE_KEY = "store-pos-v1";
 const STORAGE_BACKUP_KEY = "store-pos-v1-backup";
 const MAX_CATEGORIES = 10;
@@ -145,21 +153,25 @@ function readStoredData() {
   if (!stored) return null;
 
   try {
-    const parsed = JSON.parse(stored) as { categories?: Category[]; products?: Product[]; sales?: Sale[] };
+    const parsed = JSON.parse(stored) as StoredData;
+    const categories = parsed.categories?.length ? parsed.categories.slice(0, MAX_CATEGORIES) : seedCategories;
+    const activeCategory =
+      parsed.activeCategory === "all" || categories.some((category) => category.id === parsed.activeCategory) ? parsed.activeCategory : "all";
     return {
-      categories: parsed.categories?.length ? parsed.categories.slice(0, MAX_CATEGORIES) : seedCategories,
+      categories,
       products: parsed.products?.length ? parsed.products : seedProducts,
       sales: normalizeSales(parsed.sales ?? []),
+      activeCategory,
     };
   } catch {
     return null;
   }
 }
 
-function writeStoredData(categories: Category[], products: Product[], sales: Sale[]) {
+function writeStoredData(categories: Category[], products: Product[], sales: Sale[], activeCategory = "all") {
   if (typeof window === "undefined") return false;
   try {
-    const payload = JSON.stringify({ categories, products, sales });
+    const payload = JSON.stringify({ categories, products, sales, activeCategory, updatedAt: new Date().toISOString() });
     localStorage.setItem(STORAGE_KEY, payload);
     localStorage.setItem(STORAGE_BACKUP_KEY, payload);
     return true;
@@ -205,6 +217,7 @@ export default function Home() {
       setCategories(saved.categories);
       setProducts(saved.products);
       setSales(saved.sales);
+      setActiveCategory(saved.activeCategory);
       setProductForm((current) => ({
         ...current,
         categoryId: saved.categories[0]?.id ?? seedCategories[0].id,
@@ -216,11 +229,29 @@ export default function Home() {
 
   useEffect(() => {
     if (!ready) return;
-    const saved = writeStoredData(categories, products, sales);
+    const saved = writeStoredData(categories, products, sales, activeCategory);
     if (!saved) {
       setNotice("브라우저 저장소를 사용할 수 없습니다. 시크릿 모드나 저장소 차단 설정을 확인해 주세요.");
     }
-  }, [categories, products, sales, ready]);
+  }, [activeCategory, categories, products, sales, ready]);
+
+  useEffect(() => {
+    if (!ready) return;
+    const persistBeforeClose = () => {
+      writeStoredData(categories, products, sales, activeCategory);
+    };
+    const persistWhenHidden = () => {
+      if (document.visibilityState === "hidden") persistBeforeClose();
+    };
+
+    window.addEventListener("pagehide", persistBeforeClose);
+    document.addEventListener("visibilitychange", persistWhenHidden);
+
+    return () => {
+      window.removeEventListener("pagehide", persistBeforeClose);
+      document.removeEventListener("visibilitychange", persistWhenHidden);
+    };
+  }, [activeCategory, categories, products, sales, ready]);
 
   const activeSales = useMemo(() => sales.filter((sale) => !sale.cancelledAt), [sales]);
   const recentSales = sales.slice(0, 8);
@@ -336,7 +367,9 @@ export default function Home() {
       lines,
       total: lines.reduce((sum, line) => sum + line.total, 0),
     };
-    setSales((entries) => [sale, ...entries]);
+    const nextSales = [sale, ...sales];
+    setSales(nextSales);
+    writeStoredData(categories, products, nextSales, activeCategory);
     setCart([]);
     setNotice(`${paymentLabels[paymentMethod]} ${money(sale.total)} 결제가 기록되었습니다. 잘못 눌렀다면 최근 계산 내역에서 취소하세요.`);
   }
@@ -344,7 +377,9 @@ export default function Home() {
   function cancelSale(saleId: string) {
     const sale = sales.find((entry) => entry.id === saleId);
     if (!sale || sale.cancelledAt) return;
-    setSales((entries) => entries.map((entry) => (entry.id === saleId ? { ...entry, cancelledAt: new Date().toISOString() } : entry)));
+    const nextSales = sales.map((entry) => (entry.id === saleId ? { ...entry, cancelledAt: new Date().toISOString() } : entry));
+    setSales(nextSales);
+    writeStoredData(categories, products, nextSales, activeCategory);
     setNotice(`${timeFormatter.format(new Date(sale.soldAt))} 결제 ${money(sale.total)}를 취소했습니다.`);
   }
 
@@ -356,7 +391,9 @@ export default function Home() {
       setNotice("상품명과 0원보다 큰 가격을 입력해 주세요.");
       return;
     }
-    setProducts((items) => [{ id: makeId("prod"), name, price: Math.round(price), categoryId: productForm.categoryId }, ...items]);
+    const nextProducts = [{ id: makeId("prod"), name, price: Math.round(price), categoryId: productForm.categoryId }, ...products];
+    setProducts(nextProducts);
+    writeStoredData(categories, nextProducts, sales, activeCategory);
     setProductForm({ name: "", price: "", categoryId: productForm.categoryId });
     setNotice(`${name} 상품을 등록했습니다.`);
   }
@@ -373,14 +410,19 @@ export default function Home() {
       return;
     }
     const category = { id: makeId("cat"), name, color: colors[categories.length % colors.length] };
-    setCategories((items) => [...items, category]);
+    const nextCategories = [...categories, category];
+    setCategories(nextCategories);
+    setActiveCategory(category.id);
     setProductForm((current) => ({ ...current, categoryId: category.id }));
     setCategoryForm("");
+    writeStoredData(nextCategories, products, sales, category.id);
     setNotice(`${name} 카테고리를 추가했습니다. 현재 ${categories.length + 1}/${MAX_CATEGORIES}개입니다.`);
   }
 
   function deleteProduct(productId: string) {
-    setProducts((items) => items.filter((item) => item.id !== productId));
+    const nextProducts = products.filter((item) => item.id !== productId);
+    setProducts(nextProducts);
+    writeStoredData(categories, nextProducts, sales, activeCategory);
     setCart((items) => items.filter((item) => item.productId !== productId));
   }
 
@@ -390,9 +432,23 @@ export default function Home() {
       return;
     }
     const nextCategory = categories.find((category) => category.id !== categoryId);
-    setProducts((items) => items.map((item) => (item.categoryId === categoryId ? { ...item, categoryId: nextCategory!.id } : item)));
-    setCategories((items) => items.filter((item) => item.id !== categoryId));
+    const nextProducts = products.map((item) => (item.categoryId === categoryId ? { ...item, categoryId: nextCategory!.id } : item));
+    const nextCategories = categories.filter((item) => item.id !== categoryId);
+    setProducts(nextProducts);
+    setCategories(nextCategories);
     setActiveCategory("all");
+    writeStoredData(nextCategories, nextProducts, sales, "all");
+  }
+
+  function renameCategory(categoryId: string, name: string) {
+    const nextCategories = categories.map((item) => (item.id === categoryId ? { ...item, name } : item));
+    setCategories(nextCategories);
+    writeStoredData(nextCategories, products, sales, activeCategory);
+  }
+
+  function selectCategory(categoryId: string) {
+    setActiveCategory(categoryId);
+    writeStoredData(categories, products, sales, categoryId);
   }
 
   function exportSales() {
@@ -523,14 +579,14 @@ export default function Home() {
           </div>
 
           <div className="category-tabs" aria-label="카테고리 필터">
-            <button className={activeCategory === "all" ? "active" : ""} onClick={() => setActiveCategory("all")} type="button">
+            <button className={activeCategory === "all" ? "active" : ""} onClick={() => selectCategory("all")} type="button">
               전체
             </button>
             {categories.map((category) => (
               <button
                 className={activeCategory === category.id ? "active" : ""}
                 key={category.id}
-                onClick={() => setActiveCategory(category.id)}
+                onClick={() => selectCategory(category.id)}
                 style={{ "--accent": category.color } as React.CSSProperties}
                 type="button"
               >
@@ -715,9 +771,7 @@ export default function Home() {
                 <input
                   aria-label={`${category.name} 이름`}
                   value={category.name}
-                  onChange={(event) =>
-                    setCategories((items) => items.map((item) => (item.id === category.id ? { ...item, name: event.target.value } : item)))
-                  }
+                  onChange={(event) => renameCategory(category.id, event.target.value)}
                 />
                 <button onClick={() => deleteCategory(category.id)} type="button">
                   삭제
