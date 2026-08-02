@@ -9,6 +9,11 @@ type PosDataPayload = {
 };
 
 const STORE_ID = "main-store";
+const corsHeaders = {
+  "access-control-allow-origin": "*",
+  "access-control-allow-methods": "GET, POST, OPTIONS",
+  "access-control-allow-headers": "content-type",
+};
 
 async function ensureTable(db: D1Database) {
   await db
@@ -26,6 +31,7 @@ function jsonResponse(body: unknown, init?: ResponseInit) {
   return Response.json(body, {
     ...init,
     headers: {
+      ...corsHeaders,
       "cache-control": "no-store",
       ...(init?.headers ?? {}),
     },
@@ -84,4 +90,11 @@ export async function POST(request: Request) {
     .run();
 
   return jsonResponse({ ok: true, updatedAt });
+}
+
+export async function OPTIONS() {
+  return new Response(null, {
+    status: 204,
+    headers: corsHeaders,
+  });
 }
