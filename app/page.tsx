@@ -54,6 +54,8 @@ type StoredData = {
   updatedAt?: string;
 };
 
+type SyncState = "checking" | "cloud" | "local";
+
 const STORAGE_KEY = "store-pos-v1";
 const STORAGE_BACKUP_KEY = "store-pos-v1-backup";
 const MAX_CATEGORIES = 10;
@@ -147,6 +149,30 @@ function normalizeSales(sales: Sale[] = []) {
   }));
 }
 
+function normalizeStoredData(parsed: StoredData) {
+  const categories = parsed.categories?.length ? parsed.categories.slice(0, MAX_CATEGORIES) : seedCategories;
+  const activeCategory =
+    parsed.activeCategory === "all" || categories.some((category) => category.id === parsed.activeCategory) ? parsed.activeCategory : "all";
+
+  return {
+    categories,
+    products: parsed.products?.length ? parsed.products : seedProducts,
+    sales: normalizeSales(parsed.sales ?? []),
+    activeCategory,
+    updatedAt: parsed.updatedAt ?? "",
+  };
+}
+
+function makeStoredData(categories: Category[], products: Product[], sales: Sale[], activeCategory = "all"): Required<StoredData> {
+  return {
+    categories,
+    products,
+    sales,
+    activeCategory,
+    updatedAt: new Date().toISOString(),
+  };
+}
+
 function readStoredData() {
   if (typeof window === "undefined") return null;
   const stored = localStorage.getItem(STORAGE_KEY) ?? localStorage.getItem(STORAGE_BACKUP_KEY);
@@ -154,27 +180,52 @@ function readStoredData() {
 
   try {
     const parsed = JSON.parse(stored) as StoredData;
-    const categories = parsed.categories?.length ? parsed.categories.slice(0, MAX_CATEGORIES) : seedCategories;
-    const activeCategory =
-      parsed.activeCategory === "all" || categories.some((category) => category.id === parsed.activeCategory) ? parsed.activeCategory : "all";
-    return {
-      categories,
-      products: parsed.products?.length ? parsed.products : seedProducts,
-      sales: normalizeSales(parsed.sales ?? []),
-      activeCategory,
-    };
+    return normalizeStoredData(parsed);
   } catch {
     return null;
   }
 }
 
 function writeStoredData(categories: Category[], products: Product[], sales: Sale[], activeCategory = "all") {
-  if (typeof window === "undefined") return false;
+  if (typeof window === "undefined") return null;
   try {
-    const payload = JSON.stringify({ categories, products, sales, activeCategory, updatedAt: new Date().toISOString() });
+    const data = makeStoredData(categories, products, sales, activeCategory);
+    const payload = JSON.stringify(data);
     localStorage.setItem(STORAGE_KEY, payload);
     localStorage.setItem(STORAGE_BACKUP_KEY, payload);
-    return true;
+    return data;
+  } catch {
+    return null;
+  }
+}
+
+function storedTime(data?: Pick<StoredData, "updatedAt"> | null) {
+  return data?.updatedAt ? new Date(data.updatedAt).getTime() : 0;
+}
+
+function isNewerStoredData(next: StoredData | null, currentUpdatedAt: string) {
+  return storedTime(next) > storedTime({ updatedAt: currentUpdatedAt });
+}
+
+async function readCloudData(signal?: AbortSignal) {
+  try {
+    const response = await fetch("/api/pos-data", { cache: "no-store", signal });
+    if (!response.ok) return null;
+    const result = (await response.json()) as { data?: StoredData | null };
+    return result.data ? normalizeStoredData(result.data) : null;
+  } catch {
+    return null;
+  }
+}
+
+async function writeCloudData(data: Required<StoredData>) {
+  try {
+    const response = await fetch("/api/pos-data", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ data }),
+    });
+    return response.ok;
   } catch {
     return false;
   }
@@ -209,22 +260,60 @@ export default function Home() {
   const [productForm, setProductForm] = useState({ name: "", price: "", categoryId: seedCategories[0].id });
   const [categoryForm, setCategoryForm] = useState("");
   const [notice, setNotice] = useState("오늘 첫 판매를 기다리는 중입니다.");
+  const [lastSavedAt, setLastSavedAt] = useState("");
+  const [syncState, setSyncState] = useState<SyncState>("checking");
   const [ready, setReady] = useState(false);
 
+  function applyStoredData(data: ReturnType<typeof normalizeStoredData>) {
+    setCategories(data.categories);
+    setProducts(data.products);
+    setSales(data.sales);
+    setActiveCategory(data.activeCategory);
+    setLastSavedAt(data.updatedAt);
+    setProductForm((current) => ({
+      ...current,
+      categoryId: data.categories[0]?.id ?? seedCategories[0].id,
+    }));
+  }
+
   useEffect(() => {
+    let active = true;
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => controller.abort(), 2500);
     const saved = readStoredData();
     if (saved) {
-      setCategories(saved.categories);
-      setProducts(saved.products);
-      setSales(saved.sales);
-      setActiveCategory(saved.activeCategory);
-      setProductForm((current) => ({
-        ...current,
-        categoryId: saved.categories[0]?.id ?? seedCategories[0].id,
-      }));
+      applyStoredData(saved);
       setNotice("저장된 매장 데이터를 불러왔습니다.");
     }
-    setReady(true);
+
+    async function loadInitialData() {
+      const cloudData = await readCloudData(controller.signal);
+      window.clearTimeout(timer);
+      if (!active) return;
+
+      if (cloudData && (!saved || isNewerStoredData(cloudData, saved.updatedAt))) {
+        applyStoredData(cloudData);
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(cloudData));
+        localStorage.setItem(STORAGE_BACKUP_KEY, JSON.stringify(cloudData));
+        setSyncState("cloud");
+        setNotice("공용 저장소에서 최신 매장 데이터를 불러왔습니다.");
+      } else if (saved) {
+        const uploaded = await writeCloudData(saved);
+        if (active) setSyncState(uploaded ? "cloud" : "local");
+      } else {
+        setSyncState(cloudData ? "cloud" : "local");
+      }
+
+      if (active) setReady(true);
+    }
+
+    loadInitialData();
+
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+      controller.abort();
+    };
   }, []);
 
   useEffect(() => {
@@ -232,8 +321,41 @@ export default function Home() {
     const saved = writeStoredData(categories, products, sales, activeCategory);
     if (!saved) {
       setNotice("브라우저 저장소를 사용할 수 없습니다. 시크릿 모드나 저장소 차단 설정을 확인해 주세요.");
+      return;
     }
+    setLastSavedAt(saved.updatedAt);
+    writeCloudData(saved).then((uploaded) => {
+      setSyncState(uploaded ? "cloud" : "local");
+    });
   }, [activeCategory, categories, products, sales, ready]);
+
+  useEffect(() => {
+    if (!ready) return;
+    let stopped = false;
+
+    async function pullLatestData() {
+      const cloudData = await readCloudData();
+      if (stopped) return;
+      if (!cloudData) {
+        setSyncState("local");
+        return;
+      }
+      setSyncState("cloud");
+      if (isNewerStoredData(cloudData, lastSavedAt)) {
+        applyStoredData(cloudData);
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(cloudData));
+        localStorage.setItem(STORAGE_BACKUP_KEY, JSON.stringify(cloudData));
+        setNotice("다른 기기에서 변경한 내용을 반영했습니다.");
+      }
+    }
+
+    pullLatestData();
+    const interval = window.setInterval(pullLatestData, 5000);
+    return () => {
+      stopped = true;
+      window.clearInterval(interval);
+    };
+  }, [lastSavedAt, ready]);
 
   useEffect(() => {
     if (!ready) return;
@@ -565,6 +687,9 @@ export default function Home() {
           <button className="ghost-button" onClick={exportSales} type="button">
             Excel 내보내기
           </button>
+          <span className={`sync-pill ${syncState}`}>
+            {syncState === "checking" ? "저장 확인 중" : syncState === "cloud" ? "공용 저장 중" : "이 기기에만 저장"}
+          </span>
         </div>
       </section>
 
