@@ -3,10 +3,39 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta http-equiv="refresh" content="0; url=https://store-pos-manager.dlgurwns68.chatgpt.site/" />
     <title>매장 판매 관리 POS</title>
     <script>
-      window.location.replace("https://store-pos-manager.dlgurwns68.chatgpt.site/");
+      const target = "https://store-pos-manager.dlgurwns68.chatgpt.site/";
+      const storageKey = "store-pos-v1";
+      const backupKey = "store-pos-v1-backup";
+
+      async function moveSavedData() {
+        try {
+          const saved = localStorage.getItem(storageKey) || localStorage.getItem(backupKey);
+          if (saved) {
+            const data = JSON.parse(saved);
+            if (Array.isArray(data.categories) && Array.isArray(data.products) && Array.isArray(data.sales)) {
+              await fetch(`${target}api/pos-data`, {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({
+                  data: {
+                    ...data,
+                    updatedAt: data.updatedAt || new Date().toISOString(),
+                  },
+                }),
+              });
+            }
+          }
+        } catch {
+          // The synced site still opens even when this browser has no old data to move.
+        } finally {
+          window.location.replace(target);
+        }
+      }
+
+      moveSavedData();
+      window.setTimeout(() => window.location.replace(target), 2500);
     </script>
   </head>
   <body>
