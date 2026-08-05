@@ -373,6 +373,8 @@ export default function Home() {
   const [dayEditCart, setDayEditCart] = useState<CartItem[]>([]);
   const [dayEditPaymentMethod, setDayEditPaymentMethod] = useState<PaymentMethod>("card");
   const [dayEditCategory, setDayEditCategory] = useState("all");
+  const [dayEditOpen, setDayEditOpen] = useState(true);
+  const [dayRecordLinesOpen, setDayRecordLinesOpen] = useState(true);
   const [activeCategory, setActiveCategory] = useState("all");
   const [productSort, setProductSort] = useState<ProductSort>("createdDesc");
   const [selectedMonth, setSelectedMonth] = useState(monthKey(new Date()));
@@ -1263,14 +1265,20 @@ export default function Home() {
             )}
           </div>
           <div className="day-editor">
-            <div>
-              <p className="eyebrow">Day Edit</p>
-              <h3>{selectedCalendarDate} 내용 수정</h3>
-              <small>
-                판매 {selectedDaySales.length}건 · 합계 {money(selectedDayAmount.total)}
-              </small>
+            <div className="day-editor-head">
+              <div>
+                <p className="eyebrow">Day Edit</p>
+                <h3>{selectedCalendarDate} 내용 수정</h3>
+                <small>
+                  판매 {selectedDaySales.length}건 · 합계 {money(selectedDayAmount.total)}
+                </small>
+              </div>
+              <button className="collapse-button" onClick={() => setDayEditOpen((open) => !open)} type="button">
+                {dayEditOpen ? "접기" : "펼치기"}
+              </button>
             </div>
-            <div className="day-edit-workspace">
+            {dayEditOpen ? (
+              <div className="day-edit-workspace">
               <section>
                 <div className="category-tabs compact-tabs" aria-label="날짜 편집 카테고리 필터">
                   <button className={dayEditCategory === "all" ? "active" : ""} onClick={() => setDayEditCategory("all")} type="button">
@@ -1362,23 +1370,31 @@ export default function Home() {
                   {selectedCalendarDate}에 추가
                 </button>
               </section>
-            </div>
+              </div>
+            ) : null}
             {(selectedDayRecord?.lines?.length ?? 0) > 0 ? (
               <div className="day-record-lines">
-                <strong>추가된 품목</strong>
-                {selectedDayRecord!.lines!.map((line) => (
-                  <div key={line.id}>
-                    <span>
-                      {line.name} {line.quantity}개
-                    </span>
-                    <small>
-                      {paymentLabels[line.paymentMethod]} · {money(line.total)}
-                    </small>
-                    <button onClick={() => removeDayRecordLine(line.id)} type="button">
-                      삭제
-                    </button>
-                  </div>
-                ))}
+                <div className="day-record-lines-head">
+                  <strong>추가된 품목</strong>
+                  <button className="collapse-button" onClick={() => setDayRecordLinesOpen((open) => !open)} type="button">
+                    {dayRecordLinesOpen ? "접기" : "펼치기"}
+                  </button>
+                </div>
+                {dayRecordLinesOpen
+                  ? selectedDayRecord!.lines!.map((line) => (
+                      <div key={line.id}>
+                        <span>
+                          {line.name} {line.quantity}개
+                        </span>
+                        <small>
+                          {paymentLabels[line.paymentMethod]} · {money(line.total)}
+                        </small>
+                        <button onClick={() => removeDayRecordLine(line.id)} type="button">
+                          삭제
+                        </button>
+                      </div>
+                    ))
+                  : null}
               </div>
             ) : null}
             <label className="day-note-field">

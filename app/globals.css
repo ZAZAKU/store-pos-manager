@@ -785,6 +785,33 @@ textarea {
   gap: 12px;
 }
 
+.day-editor-head,
+.day-record-lines-head {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.day-record-lines-head {
+  align-items: center;
+}
+
+.collapse-button {
+  min-height: 34px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #ffffff;
+  color: var(--ink);
+  font-weight: 900;
+}
+
+.collapse-button:hover {
+  border-color: var(--teal);
+  color: var(--teal);
+}
+
 .compact-tabs {
   padding-bottom: 6px;
 }
@@ -867,7 +894,7 @@ textarea {
   border-top: 1px solid var(--line);
 }
 
-.day-record-lines > div {
+.day-record-lines > div:not(.day-record-lines-head) {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto auto;
   gap: 8px;

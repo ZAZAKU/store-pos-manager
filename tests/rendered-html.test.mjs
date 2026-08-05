@@ -76,6 +76,8 @@ test("keeps starter preview code out of the finished app", async () => {
   assert.match(page, /dayRecords/);
   assert.match(page, /addDayEditCartToRecord/);
   assert.match(page, /removeDayRecordLine/);
+  assert.match(page, /dayEditOpen/);
+  assert.match(page, /dayRecordLinesOpen/);
   assert.match(page, /selectedCalendarDate/);
   assert.match(page, /transfer/);
   assert.match(page, /계좌이체 매출/);
