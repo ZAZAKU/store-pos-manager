@@ -59,6 +59,8 @@ test("keeps starter preview code out of the finished app", async () => {
   assert.match(page, /rankSales/);
   assert.match(page, /monthlyRank/);
   assert.match(page, /weeklyRank/);
+  assert.match(page, /rankMonthDayRecords/);
+  assert.match(page, /selectedWeekDayRecords/);
   assert.match(page, /selectedRankMonth/);
   assert.match(page, /selectedRankDate/);
   assert.match(page, /selectedWeekLabel/);

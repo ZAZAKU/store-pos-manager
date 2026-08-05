@@ -156,16 +156,25 @@ function getWeekKey(date: Date) {
   return `${dateKey(start)} ~ ${dateKey(end)}`;
 }
 
-function rankSales(sales: Sale[]) {
+function rankSales(sales: Sale[], dayRecordsForRank: DayRecord[] = []) {
   const map = new Map<string, RankItem>();
+  const addLine = (line: SaleLine) => {
+    const current = map.get(line.productId) ?? { name: line.name, quantity: 0, total: 0 };
+    current.quantity += line.quantity;
+    current.total += line.total;
+    map.set(line.productId, current);
+  };
   sales.forEach((sale) =>
     sale.lines.forEach((line) => {
-      const current = map.get(line.productId) ?? { name: line.name, quantity: 0, total: 0 };
-      current.quantity += line.quantity;
-      current.total += line.total;
-      map.set(line.productId, current);
+      addLine(line);
     }),
   );
+  dayRecordsForRank.forEach((record) => {
+    const lines = record.lines?.length ? record.lines : legacyDayRecordLines(record);
+    lines.forEach((line) => {
+      addLine(line);
+    });
+  });
   return [...map.values()].sort((a, b) => b.quantity - a.quantity || b.total - a.total).slice(0, 5);
 }
 
@@ -581,6 +590,7 @@ export default function Home() {
     selectedMonthSales.filter((sale) => (sale.paymentMethod ?? "card") === "transfer").reduce((sum, sale) => sum + sale.total, 0) +
     selectedMonthDayRecords.reduce((sum, record) => sum + record.transfer, 0);
   const rankMonthSales = activeSales.filter((sale) => monthKey(new Date(sale.soldAt)) === selectedRankMonth);
+  const rankMonthDayRecords = dayRecords.filter((record) => record.date.startsWith(selectedRankMonth));
   const selectedRankWeekDate = new Date(selectedRankDate);
   const selectedWeekStart = startOfWeek(selectedRankWeekDate);
   const selectedWeekEnd = endOfWeek(selectedRankWeekDate);
@@ -589,8 +599,12 @@ export default function Home() {
     const soldAt = new Date(sale.soldAt);
     return soldAt >= selectedWeekStart && soldAt <= selectedWeekEnd;
   });
-  const monthlyRank = useMemo(() => rankSales(rankMonthSales), [rankMonthSales]);
-  const weeklyRank = useMemo(() => rankSales(selectedWeekSales), [selectedWeekSales]);
+  const selectedWeekDayRecords = dayRecords.filter((record) => {
+    const recordDate = new Date(`${record.date}T00:00:00`);
+    return recordDate >= selectedWeekStart && recordDate <= selectedWeekEnd;
+  });
+  const monthlyRank = useMemo(() => rankSales(rankMonthSales, rankMonthDayRecords), [rankMonthDayRecords, rankMonthSales]);
+  const weeklyRank = useMemo(() => rankSales(selectedWeekSales, selectedWeekDayRecords), [selectedWeekDayRecords, selectedWeekSales]);
 
   const dailyTotals = useMemo(() => {
     const map = new Map<string, { total: number; card: number; cash: number; transfer: number }>();
