@@ -68,6 +68,13 @@ test("keeps starter preview code out of the finished app", async () => {
   assert.match(page, /readCloudData/);
   assert.match(page, /writeCloudData/);
   assert.match(page, /공용 저장 중/);
+  assert.match(page, /ProductSort/);
+  assert.match(page, /sortProducts/);
+  assert.match(page, /productSortLabels/);
+  assert.match(page, /DayRecord/);
+  assert.match(page, /dayRecords/);
+  assert.match(page, /updateDayRecord/);
+  assert.match(page, /selectedCalendarDate/);
   assert.match(page, /transfer/);
   assert.match(page, /계좌이체 매출/);
   assert.match(page, /cancelSale/);

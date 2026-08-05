@@ -40,17 +40,29 @@ type Sale = {
   total: number;
 };
 
+type DayRecord = {
+  date: string;
+  note: string;
+  card: number;
+  cash: number;
+  transfer: number;
+};
+
 type RankItem = {
   name: string;
   quantity: number;
   total: number;
 };
 
+type ProductSort = "createdDesc" | "createdAsc" | "nameAsc" | "nameDesc" | "priceAsc" | "priceDesc";
+
 type StoredData = {
   categories?: Category[];
   products?: Product[];
   sales?: Sale[];
+  dayRecords?: DayRecord[];
   activeCategory?: string;
+  productSort?: ProductSort;
   updatedAt?: string;
 };
 
@@ -87,6 +99,15 @@ const paymentLabels: Record<PaymentMethod, string> = {
   card: "카드",
   cash: "현금",
   transfer: "계좌이체",
+};
+
+const productSortLabels: Record<ProductSort, string> = {
+  createdDesc: "등록순 내림차순",
+  createdAsc: "등록순 오름차순",
+  nameAsc: "이름 오름차순",
+  nameDesc: "이름 내림차순",
+  priceAsc: "가격 오름차순",
+  priceDesc: "가격 내림차순",
 };
 
 function makeId(prefix: string) {
@@ -149,6 +170,42 @@ function normalizeSales(sales: Sale[] = []) {
   }));
 }
 
+function normalizeDayRecords(records: DayRecord[] = []) {
+  return records
+    .filter((record) => record.date)
+    .map((record) => ({
+      date: record.date,
+      note: record.note ?? "",
+      card: Number(record.card) || 0,
+      cash: Number(record.cash) || 0,
+      transfer: Number(record.transfer) || 0,
+    }));
+}
+
+function getProductCreatedAt(product: Product) {
+  const [, timestamp] = product.id.match(/^prod-(\d+)/) ?? [];
+  return timestamp ? Number(timestamp) : 0;
+}
+
+function sortProducts(products: Product[], sort: ProductSort) {
+  return [...products].sort((a, b) => {
+    if (sort === "nameAsc" || sort === "nameDesc") {
+      const value = a.name.localeCompare(b.name, "ko-KR", { numeric: true });
+      return sort === "nameAsc" ? value : -value;
+    }
+    if (sort === "priceAsc" || sort === "priceDesc") {
+      const value = a.price - b.price || a.name.localeCompare(b.name, "ko-KR", { numeric: true });
+      return sort === "priceAsc" ? value : -value;
+    }
+    const value = getProductCreatedAt(a) - getProductCreatedAt(b);
+    return sort === "createdAsc" ? value : -value;
+  });
+}
+
+function dayRecordTotal(record?: DayRecord) {
+  return record ? record.card + record.cash + record.transfer : 0;
+}
+
 function normalizeStoredData(parsed: StoredData) {
   const categories = parsed.categories?.length ? parsed.categories.slice(0, MAX_CATEGORIES) : seedCategories;
   const activeCategory =
@@ -158,17 +215,28 @@ function normalizeStoredData(parsed: StoredData) {
     categories,
     products: parsed.products?.length ? parsed.products : seedProducts,
     sales: normalizeSales(parsed.sales ?? []),
+    dayRecords: normalizeDayRecords(parsed.dayRecords ?? []),
     activeCategory,
+    productSort: parsed.productSort ?? "createdDesc",
     updatedAt: parsed.updatedAt ?? "",
   };
 }
 
-function makeStoredData(categories: Category[], products: Product[], sales: Sale[], activeCategory = "all"): Required<StoredData> {
+function makeStoredData(
+  categories: Category[],
+  products: Product[],
+  sales: Sale[],
+  activeCategory = "all",
+  dayRecords: DayRecord[] = [],
+  productSort: ProductSort = "createdDesc",
+): Required<StoredData> {
   return {
     categories,
     products,
     sales,
+    dayRecords,
     activeCategory,
+    productSort,
     updatedAt: new Date().toISOString(),
   };
 }
@@ -186,10 +254,17 @@ function readStoredData() {
   }
 }
 
-function writeStoredData(categories: Category[], products: Product[], sales: Sale[], activeCategory = "all") {
+function writeStoredData(
+  categories: Category[],
+  products: Product[],
+  sales: Sale[],
+  activeCategory = "all",
+  dayRecords: DayRecord[] = [],
+  productSort: ProductSort = "createdDesc",
+) {
   if (typeof window === "undefined") return null;
   try {
-    const data = makeStoredData(categories, products, sales, activeCategory);
+    const data = makeStoredData(categories, products, sales, activeCategory, dayRecords, productSort);
     const payload = JSON.stringify(data);
     localStorage.setItem(STORAGE_KEY, payload);
     localStorage.setItem(STORAGE_BACKUP_KEY, payload);
@@ -251,10 +326,13 @@ export default function Home() {
   const [categories, setCategories] = useState<Category[]>(seedCategories);
   const [products, setProducts] = useState<Product[]>(seedProducts);
   const [sales, setSales] = useState<Sale[]>([]);
+  const [dayRecords, setDayRecords] = useState<DayRecord[]>([]);
   const [cart, setCart] = useState<CartItem[]>([]);
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("card");
   const [activeCategory, setActiveCategory] = useState("all");
+  const [productSort, setProductSort] = useState<ProductSort>("createdDesc");
   const [selectedMonth, setSelectedMonth] = useState(monthKey(new Date()));
+  const [selectedCalendarDate, setSelectedCalendarDate] = useState(dateKey(new Date()));
   const [selectedRankMonth, setSelectedRankMonth] = useState(monthKey(new Date()));
   const [selectedRankDate, setSelectedRankDate] = useState(dateKey(new Date()));
   const [productForm, setProductForm] = useState({ name: "", price: "", categoryId: seedCategories[0].id });
@@ -268,7 +346,9 @@ export default function Home() {
     setCategories(data.categories);
     setProducts(data.products);
     setSales(data.sales);
+    setDayRecords(data.dayRecords);
     setActiveCategory(data.activeCategory);
+    setProductSort(data.productSort);
     setLastSavedAt(data.updatedAt);
     setProductForm((current) => ({
       ...current,
@@ -318,7 +398,7 @@ export default function Home() {
 
   useEffect(() => {
     if (!ready) return;
-    const saved = writeStoredData(categories, products, sales, activeCategory);
+    const saved = writeStoredData(categories, products, sales, activeCategory, dayRecords, productSort);
     if (!saved) {
       setNotice("브라우저 저장소를 사용할 수 없습니다. 시크릿 모드나 저장소 차단 설정을 확인해 주세요.");
       return;
@@ -327,7 +407,7 @@ export default function Home() {
     writeCloudData(saved).then((uploaded) => {
       setSyncState(uploaded ? "cloud" : "local");
     });
-  }, [activeCategory, categories, products, sales, ready]);
+  }, [activeCategory, categories, dayRecords, productSort, products, sales, ready]);
 
   useEffect(() => {
     if (!ready) return;
@@ -360,7 +440,7 @@ export default function Home() {
   useEffect(() => {
     if (!ready) return;
     const persistBeforeClose = () => {
-      writeStoredData(categories, products, sales, activeCategory);
+      writeStoredData(categories, products, sales, activeCategory, dayRecords, productSort);
     };
     const persistWhenHidden = () => {
       if (document.visibilityState === "hidden") persistBeforeClose();
@@ -373,16 +453,18 @@ export default function Home() {
       window.removeEventListener("pagehide", persistBeforeClose);
       document.removeEventListener("visibilitychange", persistWhenHidden);
     };
-  }, [activeCategory, categories, products, sales, ready]);
+  }, [activeCategory, categories, dayRecords, productSort, products, sales, ready]);
 
   const activeSales = useMemo(() => sales.filter((sale) => !sale.cancelledAt), [sales]);
   const recentSales = sales.slice(0, 8);
   const categoryMap = useMemo(() => new Map(categories.map((category) => [category.id, category])), [categories]);
+  const dayRecordMap = useMemo(() => new Map(dayRecords.map((record) => [record.date, record])), [dayRecords]);
 
   const visibleProducts = useMemo(
-    () => products.filter((product) => activeCategory === "all" || product.categoryId === activeCategory),
-    [activeCategory, products],
+    () => sortProducts(products.filter((product) => activeCategory === "all" || product.categoryId === activeCategory), productSort),
+    [activeCategory, productSort, products],
   );
+  const sortedProducts = useMemo(() => sortProducts(products, productSort), [productSort, products]);
 
   const cartLines = useMemo(
     () =>
@@ -403,24 +485,33 @@ export default function Home() {
   );
 
   const cartTotal = cartLines.reduce((sum, item) => sum + (item?.total ?? 0), 0);
+  const todayRecord = dayRecordMap.get(dateKey(new Date()));
   const todayTotal = activeSales
     .filter((sale) => dateKey(new Date(sale.soldAt)) === dateKey(new Date()))
-    .reduce((sum, sale) => sum + sale.total, 0);
+    .reduce((sum, sale) => sum + sale.total, 0) + dayRecordTotal(todayRecord);
   const todayCardTotal = activeSales
     .filter((sale) => dateKey(new Date(sale.soldAt)) === dateKey(new Date()) && (sale.paymentMethod ?? "card") === "card")
-    .reduce((sum, sale) => sum + sale.total, 0);
+    .reduce((sum, sale) => sum + sale.total, 0) + (todayRecord?.card ?? 0);
   const todayCashTotal = activeSales
     .filter((sale) => dateKey(new Date(sale.soldAt)) === dateKey(new Date()) && (sale.paymentMethod ?? "card") === "cash")
-    .reduce((sum, sale) => sum + sale.total, 0);
+    .reduce((sum, sale) => sum + sale.total, 0) + (todayRecord?.cash ?? 0);
   const todayTransferTotal = activeSales
     .filter((sale) => dateKey(new Date(sale.soldAt)) === dateKey(new Date()) && (sale.paymentMethod ?? "card") === "transfer")
-    .reduce((sum, sale) => sum + sale.total, 0);
+    .reduce((sum, sale) => sum + sale.total, 0) + (todayRecord?.transfer ?? 0);
 
   const selectedMonthSales = activeSales.filter((sale) => monthKey(new Date(sale.soldAt)) === selectedMonth);
-  const monthlyTotal = selectedMonthSales.reduce((sum, sale) => sum + sale.total, 0);
-  const monthlyCardTotal = selectedMonthSales.filter((sale) => (sale.paymentMethod ?? "card") === "card").reduce((sum, sale) => sum + sale.total, 0);
-  const monthlyCashTotal = selectedMonthSales.filter((sale) => (sale.paymentMethod ?? "card") === "cash").reduce((sum, sale) => sum + sale.total, 0);
-  const monthlyTransferTotal = selectedMonthSales.filter((sale) => (sale.paymentMethod ?? "card") === "transfer").reduce((sum, sale) => sum + sale.total, 0);
+  const selectedMonthDayRecords = dayRecords.filter((record) => record.date.startsWith(selectedMonth));
+  const monthlyTotal =
+    selectedMonthSales.reduce((sum, sale) => sum + sale.total, 0) + selectedMonthDayRecords.reduce((sum, record) => sum + dayRecordTotal(record), 0);
+  const monthlyCardTotal =
+    selectedMonthSales.filter((sale) => (sale.paymentMethod ?? "card") === "card").reduce((sum, sale) => sum + sale.total, 0) +
+    selectedMonthDayRecords.reduce((sum, record) => sum + record.card, 0);
+  const monthlyCashTotal =
+    selectedMonthSales.filter((sale) => (sale.paymentMethod ?? "card") === "cash").reduce((sum, sale) => sum + sale.total, 0) +
+    selectedMonthDayRecords.reduce((sum, record) => sum + record.cash, 0);
+  const monthlyTransferTotal =
+    selectedMonthSales.filter((sale) => (sale.paymentMethod ?? "card") === "transfer").reduce((sum, sale) => sum + sale.total, 0) +
+    selectedMonthDayRecords.reduce((sum, record) => sum + record.transfer, 0);
   const rankMonthSales = activeSales.filter((sale) => monthKey(new Date(sale.soldAt)) === selectedRankMonth);
   const selectedRankWeekDate = new Date(selectedRankDate);
   const selectedWeekStart = startOfWeek(selectedRankWeekDate);
@@ -448,8 +539,20 @@ export default function Home() {
       }
       map.set(key, current);
     });
+    selectedMonthDayRecords.forEach((record) => {
+      const current = map.get(record.date) ?? { total: 0, card: 0, cash: 0, transfer: 0 };
+      current.card += record.card;
+      current.cash += record.cash;
+      current.transfer += record.transfer;
+      current.total += dayRecordTotal(record);
+      map.set(record.date, current);
+    });
     return map;
-  }, [selectedMonthSales]);
+  }, [selectedMonthDayRecords, selectedMonthSales]);
+
+  const selectedDayRecord = dayRecordMap.get(selectedCalendarDate);
+  const selectedDaySales = activeSales.filter((sale) => dateKey(new Date(sale.soldAt)) === selectedCalendarDate);
+  const selectedDayAmount = dailyTotals.get(selectedCalendarDate) ?? { total: 0, card: 0, cash: 0, transfer: 0 };
 
   function addToCart(productId: string) {
     setCart((items) => {
@@ -491,7 +594,7 @@ export default function Home() {
     };
     const nextSales = [sale, ...sales];
     setSales(nextSales);
-    writeStoredData(categories, products, nextSales, activeCategory);
+    writeStoredData(categories, products, nextSales, activeCategory, dayRecords, productSort);
     setCart([]);
     setNotice(`${paymentLabels[paymentMethod]} ${money(sale.total)} 결제가 기록되었습니다. 잘못 눌렀다면 최근 계산 내역에서 취소하세요.`);
   }
@@ -501,7 +604,7 @@ export default function Home() {
     if (!sale || sale.cancelledAt) return;
     const nextSales = sales.map((entry) => (entry.id === saleId ? { ...entry, cancelledAt: new Date().toISOString() } : entry));
     setSales(nextSales);
-    writeStoredData(categories, products, nextSales, activeCategory);
+    writeStoredData(categories, products, nextSales, activeCategory, dayRecords, productSort);
     setNotice(`${timeFormatter.format(new Date(sale.soldAt))} 결제 ${money(sale.total)}를 취소했습니다.`);
   }
 
@@ -515,7 +618,7 @@ export default function Home() {
     }
     const nextProducts = [{ id: makeId("prod"), name, price: Math.round(price), categoryId: productForm.categoryId }, ...products];
     setProducts(nextProducts);
-    writeStoredData(categories, nextProducts, sales, activeCategory);
+    writeStoredData(categories, nextProducts, sales, activeCategory, dayRecords, productSort);
     setProductForm({ name: "", price: "", categoryId: productForm.categoryId });
     setNotice(`${name} 상품을 등록했습니다.`);
   }
@@ -537,14 +640,14 @@ export default function Home() {
     setActiveCategory(category.id);
     setProductForm((current) => ({ ...current, categoryId: category.id }));
     setCategoryForm("");
-    writeStoredData(nextCategories, products, sales, category.id);
+    writeStoredData(nextCategories, products, sales, category.id, dayRecords, productSort);
     setNotice(`${name} 카테고리를 추가했습니다. 현재 ${categories.length + 1}/${MAX_CATEGORIES}개입니다.`);
   }
 
   function deleteProduct(productId: string) {
     const nextProducts = products.filter((item) => item.id !== productId);
     setProducts(nextProducts);
-    writeStoredData(categories, nextProducts, sales, activeCategory);
+    writeStoredData(categories, nextProducts, sales, activeCategory, dayRecords, productSort);
     setCart((items) => items.filter((item) => item.productId !== productId));
   }
 
@@ -559,18 +662,55 @@ export default function Home() {
     setProducts(nextProducts);
     setCategories(nextCategories);
     setActiveCategory("all");
-    writeStoredData(nextCategories, nextProducts, sales, "all");
+    writeStoredData(nextCategories, nextProducts, sales, "all", dayRecords, productSort);
   }
 
   function renameCategory(categoryId: string, name: string) {
     const nextCategories = categories.map((item) => (item.id === categoryId ? { ...item, name } : item));
     setCategories(nextCategories);
-    writeStoredData(nextCategories, products, sales, activeCategory);
+    writeStoredData(nextCategories, products, sales, activeCategory, dayRecords, productSort);
   }
 
   function selectCategory(categoryId: string) {
     setActiveCategory(categoryId);
-    writeStoredData(categories, products, sales, categoryId);
+    writeStoredData(categories, products, sales, categoryId, dayRecords, productSort);
+  }
+
+  function changeProductSort(sort: ProductSort) {
+    setProductSort(sort);
+    writeStoredData(categories, products, sales, activeCategory, dayRecords, sort);
+  }
+
+  function selectCalendarDate(date: string) {
+    setSelectedCalendarDate(date);
+    setSelectedMonth(date.slice(0, 7));
+  }
+
+  function changeSettlementMonth(month: string) {
+    setSelectedMonth(month);
+    if (!selectedCalendarDate.startsWith(month)) {
+      setSelectedCalendarDate(`${month}-01`);
+    }
+  }
+
+  function updateDayRecord(date: string, patch: Partial<DayRecord>) {
+    const current = dayRecordMap.get(date) ?? { date, note: "", card: 0, cash: 0, transfer: 0 };
+    const nextRecord = {
+      ...current,
+      ...patch,
+      date,
+      note: patch.note ?? current.note,
+      card: Math.max(0, Math.round(Number(patch.card ?? current.card) || 0)),
+      cash: Math.max(0, Math.round(Number(patch.cash ?? current.cash) || 0)),
+      transfer: Math.max(0, Math.round(Number(patch.transfer ?? current.transfer) || 0)),
+    };
+    const keepRecord = nextRecord.note.trim() || dayRecordTotal(nextRecord) > 0;
+    const nextRecords = keepRecord
+      ? [...dayRecords.filter((record) => record.date !== date), nextRecord].sort((a, b) => a.date.localeCompare(b.date))
+      : dayRecords.filter((record) => record.date !== date);
+    setDayRecords(nextRecords);
+    writeStoredData(categories, products, sales, activeCategory, nextRecords, productSort);
+    setNotice(`${date} 내용을 저장했습니다.`);
   }
 
   function exportSales() {
@@ -617,10 +757,28 @@ export default function Home() {
       }
       settlement.set(key, current);
     });
+    dayRecords.forEach((record) => {
+      const current = settlement.get(record.date) ?? { card: 0, cash: 0, transfer: 0, total: 0 };
+      current.card += record.card;
+      current.cash += record.cash;
+      current.transfer += record.transfer;
+      current.total += dayRecordTotal(record);
+      settlement.set(record.date, current);
+    });
     [...settlement.entries()]
       .sort(([a], [b]) => a.localeCompare(b))
       .forEach(([date, amount]) => {
         rows.push([date, amount.card, amount.cash, amount.transfer, amount.total]);
+      });
+
+    rows.push([]);
+    rows.push(["달력 추가/수정 내역"]);
+    rows.push(["날짜", "카드 추가", "현금 추가", "계좌이체 추가", "메모"]);
+    dayRecords
+      .filter((record) => record.note.trim() || dayRecordTotal(record) > 0)
+      .sort((a, b) => a.date.localeCompare(b.date))
+      .forEach((record) => {
+        rows.push([record.date, record.card, record.cash, record.transfer, record.note]);
       });
 
     rows.push([]);
@@ -700,7 +858,19 @@ export default function Home() {
               <p className="eyebrow">Order</p>
               <h2>상품 선택</h2>
             </div>
-            <span className="notice">{notice}</span>
+            <div className="panel-tools">
+              <label>
+                정렬
+                <select value={productSort} onChange={(event) => changeProductSort(event.target.value as ProductSort)}>
+                  {Object.entries(productSortLabels).map(([value, label]) => (
+                    <option key={value} value={value}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <span className="notice">{notice}</span>
+            </div>
           </div>
 
           <div className="category-tabs" aria-label="카테고리 필터">
@@ -858,7 +1028,7 @@ export default function Home() {
             </button>
           </form>
           <div className="compact-list">
-            {products.map((product) => (
+            {sortedProducts.map((product) => (
               <div key={product.id}>
                 <span>{product.name}</span>
                 <small>{money(product.price)}</small>
@@ -912,7 +1082,7 @@ export default function Home() {
               <p className="eyebrow">Settlement</p>
               <h2>정산 달력</h2>
             </div>
-            <input aria-label="정산 월" type="month" value={selectedMonth} onChange={(event) => setSelectedMonth(event.target.value)} />
+            <input aria-label="정산 월" type="month" value={selectedMonth} onChange={(event) => changeSettlementMonth(event.target.value)} />
           </div>
           <div className="monthly-total">
             <div>
@@ -931,7 +1101,19 @@ export default function Home() {
               cell.type === "blank" ? (
                 <div className="calendar-day blank" key={cell.key} />
               ) : (
-                <div className={cell.amount.total ? "calendar-day has-sale" : "calendar-day"} key={cell.key}>
+                <button
+                  className={[
+                    "calendar-day",
+                    cell.amount.total ? "has-sale" : "",
+                    dayRecordMap.get(cell.key)?.note ? "has-note" : "",
+                    selectedCalendarDate === cell.key ? "selected" : "",
+                  ]
+                    .filter(Boolean)
+                    .join(" ")}
+                  key={cell.key}
+                  onClick={() => selectCalendarDate(cell.key)}
+                  type="button"
+                >
                   <span>{cell.day}</span>
                   <strong>{cell.amount.total ? money(cell.amount.total) : ""}</strong>
                   {cell.amount.total ? (
@@ -941,10 +1123,60 @@ export default function Home() {
                       <em>이체 {money(cell.amount.transfer)}</em>
                     </div>
                   ) : null}
+                  {dayRecordMap.get(cell.key)?.note ? <em className="day-note-mark">메모</em> : null}
                   <small>{weekdayFormatter.format(new Date(cell.key))}</small>
-                </div>
+                </button>
               ),
             )}
+          </div>
+          <div className="day-editor">
+            <div>
+              <p className="eyebrow">Day Edit</p>
+              <h3>{selectedCalendarDate} 내용 수정</h3>
+              <small>
+                판매 {selectedDaySales.length}건 · 합계 {money(selectedDayAmount.total)}
+              </small>
+            </div>
+            <div className="day-editor-grid">
+              <label>
+                카드 추가
+                <input
+                  inputMode="numeric"
+                  min="0"
+                  type="number"
+                  value={selectedDayRecord?.card || ""}
+                  onChange={(event) => updateDayRecord(selectedCalendarDate, { card: Number(event.target.value) })}
+                />
+              </label>
+              <label>
+                현금 추가
+                <input
+                  inputMode="numeric"
+                  min="0"
+                  type="number"
+                  value={selectedDayRecord?.cash || ""}
+                  onChange={(event) => updateDayRecord(selectedCalendarDate, { cash: Number(event.target.value) })}
+                />
+              </label>
+              <label>
+                이체 추가
+                <input
+                  inputMode="numeric"
+                  min="0"
+                  type="number"
+                  value={selectedDayRecord?.transfer || ""}
+                  onChange={(event) => updateDayRecord(selectedCalendarDate, { transfer: Number(event.target.value) })}
+                />
+              </label>
+            </div>
+            <label className="day-note-field">
+              메모
+              <textarea
+                placeholder="해당 날짜에 남길 내용"
+                value={selectedDayRecord?.note ?? ""}
+                onChange={(event) => updateDayRecord(selectedCalendarDate, { note: event.target.value })}
+              />
+            </label>
           </div>
         </div>
 
