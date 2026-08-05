@@ -779,6 +779,125 @@ textarea {
   gap: 8px;
 }
 
+.day-edit-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 360px);
+  gap: 12px;
+}
+
+.compact-tabs {
+  padding-bottom: 6px;
+}
+
+.compact-tabs button {
+  min-height: 34px;
+  padding: 0 11px;
+  font-size: 13px;
+}
+
+.day-product-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(128px, 1fr));
+  gap: 8px;
+}
+
+.day-product-tile {
+  display: grid;
+  min-height: 112px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #ffffff;
+  color: inherit;
+  text-align: left;
+}
+
+.day-product-tile strong {
+  align-self: end;
+  font-size: 15px;
+}
+
+.day-product-tile b {
+  font-size: 16px;
+}
+
+.day-product-tile small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.day-edit-cart {
+  display: grid;
+  gap: 10px;
+  align-content: start;
+  min-width: 0;
+}
+
+.day-edit-cart-head,
+.day-edit-total {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.day-edit-lines {
+  display: grid;
+  gap: 8px;
+  max-height: 280px;
+  overflow: auto;
+}
+
+.day-edit-total {
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #ecfdf5;
+}
+
+.day-edit-total span {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.day-record-lines {
+  display: grid;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.day-record-lines > div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.day-record-lines span,
+.day-record-lines small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.day-record-lines small {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.day-record-lines button {
+  border: 0;
+  background: transparent;
+  color: var(--danger);
+  font-weight: 900;
+}
+
 .day-note-field {
   min-width: 0;
 }
@@ -803,6 +922,10 @@ textarea {
   }
 
   .rank-columns {
+    grid-template-columns: 1fr;
+  }
+
+  .day-edit-workspace {
     grid-template-columns: 1fr;
   }
 

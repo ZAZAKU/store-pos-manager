@@ -31,6 +31,11 @@ type SaleLine = {
   total: number;
 };
 
+type DayRecordLine = SaleLine & {
+  id: string;
+  paymentMethod: PaymentMethod;
+};
+
 type Sale = {
   id: string;
   soldAt: string;
@@ -46,6 +51,7 @@ type DayRecord = {
   card: number;
   cash: number;
   transfer: number;
+  lines?: DayRecordLine[];
 };
 
 type RankItem = {
@@ -173,13 +179,23 @@ function normalizeSales(sales: Sale[] = []) {
 function normalizeDayRecords(records: DayRecord[] = []) {
   return records
     .filter((record) => record.date)
-    .map((record) => ({
-      date: record.date,
-      note: record.note ?? "",
-      card: Number(record.card) || 0,
-      cash: Number(record.cash) || 0,
-      transfer: Number(record.transfer) || 0,
-    }));
+    .map((record) => {
+      const lines = (record.lines ?? []).map((line) => ({
+        ...line,
+        id: line.id ?? makeId("day-line"),
+        paymentMethod: line.paymentMethod ?? "card",
+      }));
+      const totals = summarizeDayRecordLines(lines);
+      const hasLines = lines.length > 0;
+      return {
+        date: record.date,
+        note: record.note ?? "",
+        card: hasLines ? totals.card : Number(record.card) || 0,
+        cash: hasLines ? totals.cash : Number(record.cash) || 0,
+        transfer: hasLines ? totals.transfer : Number(record.transfer) || 0,
+        lines,
+      };
+    });
 }
 
 function getProductCreatedAt(product: Product) {
@@ -204,6 +220,31 @@ function sortProducts(products: Product[], sort: ProductSort) {
 
 function dayRecordTotal(record?: DayRecord) {
   return record ? record.card + record.cash + record.transfer : 0;
+}
+
+function summarizeDayRecordLines(lines: DayRecordLine[]) {
+  return lines.reduce(
+    (sum, line) => {
+      sum[line.paymentMethod] += line.total;
+      return sum;
+    },
+    { card: 0, cash: 0, transfer: 0 },
+  );
+}
+
+function legacyDayRecordLines(record: DayRecord) {
+  return (["card", "cash", "transfer"] as PaymentMethod[])
+    .filter((method) => record[method] > 0)
+    .map((method) => ({
+      id: makeId("day-line"),
+      productId: `manual-${method}`,
+      name: "직접 입력",
+      categoryName: "달력 수정",
+      price: record[method],
+      quantity: 1,
+      total: record[method],
+      paymentMethod: method,
+    }));
 }
 
 function normalizeStoredData(parsed: StoredData) {
@@ -329,6 +370,9 @@ export default function Home() {
   const [dayRecords, setDayRecords] = useState<DayRecord[]>([]);
   const [cart, setCart] = useState<CartItem[]>([]);
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("card");
+  const [dayEditCart, setDayEditCart] = useState<CartItem[]>([]);
+  const [dayEditPaymentMethod, setDayEditPaymentMethod] = useState<PaymentMethod>("card");
+  const [dayEditCategory, setDayEditCategory] = useState("all");
   const [activeCategory, setActiveCategory] = useState("all");
   const [productSort, setProductSort] = useState<ProductSort>("createdDesc");
   const [selectedMonth, setSelectedMonth] = useState(monthKey(new Date()));
@@ -464,6 +508,10 @@ export default function Home() {
     () => sortProducts(products.filter((product) => activeCategory === "all" || product.categoryId === activeCategory), productSort),
     [activeCategory, productSort, products],
   );
+  const visibleDayEditProducts = useMemo(
+    () => sortProducts(products.filter((product) => dayEditCategory === "all" || product.categoryId === dayEditCategory), productSort),
+    [dayEditCategory, productSort, products],
+  );
   const sortedProducts = useMemo(() => sortProducts(products, productSort), [productSort, products]);
 
   const cartLines = useMemo(
@@ -485,6 +533,24 @@ export default function Home() {
   );
 
   const cartTotal = cartLines.reduce((sum, item) => sum + (item?.total ?? 0), 0);
+  const dayEditCartLines = useMemo(
+    () =>
+      dayEditCart
+        .map((item) => {
+          const product = products.find((entry) => entry.id === item.productId);
+          if (!product) return null;
+          const category = categoryMap.get(product.categoryId);
+          return {
+            ...item,
+            product,
+            categoryName: category?.name ?? "미분류",
+            total: product.price * item.quantity,
+          };
+        })
+        .filter(Boolean),
+    [categoryMap, dayEditCart, products],
+  );
+  const dayEditCartTotal = dayEditCartLines.reduce((sum, item) => sum + (item?.total ?? 0), 0);
   const todayRecord = dayRecordMap.get(dateKey(new Date()));
   const todayTotal = activeSales
     .filter((sale) => dateKey(new Date(sale.soldAt)) === dateKey(new Date()))
@@ -564,12 +630,30 @@ export default function Home() {
     });
   }
 
+  function addToDayEditCart(productId: string) {
+    setDayEditCart((items) => {
+      const existing = items.find((item) => item.productId === productId);
+      if (existing) {
+        return items.map((item) => (item.productId === productId ? { ...item, quantity: item.quantity + 1 } : item));
+      }
+      return [...items, { productId, quantity: 1 }];
+    });
+  }
+
   function changeQuantity(productId: string, quantity: number) {
     if (quantity <= 0) {
       setCart((items) => items.filter((item) => item.productId !== productId));
       return;
     }
     setCart((items) => items.map((item) => (item.productId === productId ? { ...item, quantity } : item)));
+  }
+
+  function changeDayEditQuantity(productId: string, quantity: number) {
+    if (quantity <= 0) {
+      setDayEditCart((items) => items.filter((item) => item.productId !== productId));
+      return;
+    }
+    setDayEditCart((items) => items.map((item) => (item.productId === productId ? { ...item, quantity } : item)));
   }
 
   function checkout() {
@@ -649,6 +733,7 @@ export default function Home() {
     setProducts(nextProducts);
     writeStoredData(categories, nextProducts, sales, activeCategory, dayRecords, productSort);
     setCart((items) => items.filter((item) => item.productId !== productId));
+    setDayEditCart((items) => items.filter((item) => item.productId !== productId));
   }
 
   function deleteCategory(categoryId: string) {
@@ -684,6 +769,7 @@ export default function Home() {
   function selectCalendarDate(date: string) {
     setSelectedCalendarDate(date);
     setSelectedMonth(date.slice(0, 7));
+    setDayEditCart([]);
   }
 
   function changeSettlementMonth(month: string) {
@@ -693,24 +779,65 @@ export default function Home() {
     }
   }
 
-  function updateDayRecord(date: string, patch: Partial<DayRecord>) {
-    const current = dayRecordMap.get(date) ?? { date, note: "", card: 0, cash: 0, transfer: 0 };
-    const nextRecord = {
-      ...current,
-      ...patch,
-      date,
-      note: patch.note ?? current.note,
-      card: Math.max(0, Math.round(Number(patch.card ?? current.card) || 0)),
-      cash: Math.max(0, Math.round(Number(patch.cash ?? current.cash) || 0)),
-      transfer: Math.max(0, Math.round(Number(patch.transfer ?? current.transfer) || 0)),
-    };
-    const keepRecord = nextRecord.note.trim() || dayRecordTotal(nextRecord) > 0;
+  function saveDayRecord(date: string, nextRecord: DayRecord) {
+    const keepRecord = nextRecord.note.trim() || dayRecordTotal(nextRecord) > 0 || (nextRecord.lines?.length ?? 0) > 0;
     const nextRecords = keepRecord
       ? [...dayRecords.filter((record) => record.date !== date), nextRecord].sort((a, b) => a.date.localeCompare(b.date))
       : dayRecords.filter((record) => record.date !== date);
     setDayRecords(nextRecords);
     writeStoredData(categories, products, sales, activeCategory, nextRecords, productSort);
+  }
+
+  function updateDayRecordNote(date: string, note: string) {
+    const current = dayRecordMap.get(date) ?? { date, note: "", card: 0, cash: 0, transfer: 0, lines: [] };
+    const nextRecord = {
+      ...current,
+      date,
+      note,
+    };
+    saveDayRecord(date, nextRecord);
     setNotice(`${date} 내용을 저장했습니다.`);
+  }
+
+  function addDayEditCartToRecord() {
+    if (!dayEditCartLines.length) {
+      setNotice("선택한 날짜에 추가할 상품이 없습니다.");
+      return;
+    }
+    const current = dayRecordMap.get(selectedCalendarDate) ?? { date: selectedCalendarDate, note: "", card: 0, cash: 0, transfer: 0, lines: [] };
+    const newLines: DayRecordLine[] = dayEditCartLines.map((item) => ({
+      id: makeId("day-line"),
+      productId: item!.product.id,
+      name: item!.product.name,
+      categoryName: item!.categoryName,
+      price: item!.product.price,
+      quantity: item!.quantity,
+      total: item!.total,
+      paymentMethod: dayEditPaymentMethod,
+    }));
+    const existingLines = current.lines?.length ? current.lines : legacyDayRecordLines(current);
+    const lines = [...existingLines, ...newLines];
+    const totals = summarizeDayRecordLines(lines);
+    saveDayRecord(selectedCalendarDate, {
+      ...current,
+      ...totals,
+      lines,
+    });
+    setDayEditCart([]);
+    setNotice(`${selectedCalendarDate}에 ${paymentLabels[dayEditPaymentMethod]} ${money(dayEditCartTotal)}를 추가했습니다.`);
+  }
+
+  function removeDayRecordLine(lineId: string) {
+    const current = dayRecordMap.get(selectedCalendarDate);
+    if (!current) return;
+    const lines = (current.lines ?? []).filter((line) => line.id !== lineId);
+    const totals = summarizeDayRecordLines(lines);
+    saveDayRecord(selectedCalendarDate, {
+      ...current,
+      ...totals,
+      lines,
+    });
+    setNotice(`${selectedCalendarDate} 내역을 수정했습니다.`);
   }
 
   function exportSales() {
@@ -773,12 +900,18 @@ export default function Home() {
 
     rows.push([]);
     rows.push(["달력 추가/수정 내역"]);
-    rows.push(["날짜", "카드 추가", "현금 추가", "계좌이체 추가", "메모"]);
+    rows.push(["날짜", "결제수단", "상품명", "카테고리", "수량", "금액", "메모"]);
     dayRecords
       .filter((record) => record.note.trim() || dayRecordTotal(record) > 0)
       .sort((a, b) => a.date.localeCompare(b.date))
       .forEach((record) => {
-        rows.push([record.date, record.card, record.cash, record.transfer, record.note]);
+        if (record.lines?.length) {
+          record.lines.forEach((line) => {
+            rows.push([record.date, paymentLabels[line.paymentMethod], line.name, line.categoryName, line.quantity, line.total, record.note]);
+          });
+        } else {
+          rows.push([record.date, "직접 입력", "", "", "", dayRecordTotal(record), record.note]);
+        }
       });
 
     rows.push([]);
@@ -1137,44 +1270,123 @@ export default function Home() {
                 판매 {selectedDaySales.length}건 · 합계 {money(selectedDayAmount.total)}
               </small>
             </div>
-            <div className="day-editor-grid">
-              <label>
-                카드 추가
-                <input
-                  inputMode="numeric"
-                  min="0"
-                  type="number"
-                  value={selectedDayRecord?.card || ""}
-                  onChange={(event) => updateDayRecord(selectedCalendarDate, { card: Number(event.target.value) })}
-                />
-              </label>
-              <label>
-                현금 추가
-                <input
-                  inputMode="numeric"
-                  min="0"
-                  type="number"
-                  value={selectedDayRecord?.cash || ""}
-                  onChange={(event) => updateDayRecord(selectedCalendarDate, { cash: Number(event.target.value) })}
-                />
-              </label>
-              <label>
-                이체 추가
-                <input
-                  inputMode="numeric"
-                  min="0"
-                  type="number"
-                  value={selectedDayRecord?.transfer || ""}
-                  onChange={(event) => updateDayRecord(selectedCalendarDate, { transfer: Number(event.target.value) })}
-                />
-              </label>
+            <div className="day-edit-workspace">
+              <section>
+                <div className="category-tabs compact-tabs" aria-label="날짜 편집 카테고리 필터">
+                  <button className={dayEditCategory === "all" ? "active" : ""} onClick={() => setDayEditCategory("all")} type="button">
+                    전체
+                  </button>
+                  {categories.map((category) => (
+                    <button
+                      className={dayEditCategory === category.id ? "active" : ""}
+                      key={category.id}
+                      onClick={() => setDayEditCategory(category.id)}
+                      style={{ "--accent": category.color } as React.CSSProperties}
+                      type="button"
+                    >
+                      {category.name}
+                    </button>
+                  ))}
+                </div>
+                <div className="day-product-grid">
+                  {visibleDayEditProducts.map((product) => {
+                    const category = categoryMap.get(product.categoryId);
+                    return (
+                      <button className="day-product-tile" key={product.id} onClick={() => addToDayEditCart(product.id)} type="button">
+                        <span className="swatch" style={{ background: category?.color }} />
+                        <strong>{product.name}</strong>
+                        <small>{category?.name ?? "미분류"}</small>
+                        <b>{money(product.price)}</b>
+                      </button>
+                    );
+                  })}
+                </div>
+              </section>
+              <section className="day-edit-cart">
+                <div className="day-edit-cart-head">
+                  <strong>선택 상품</strong>
+                  <button className="text-button" onClick={() => setDayEditCart([])} type="button">
+                    비우기
+                  </button>
+                </div>
+                <div className="day-edit-lines">
+                  {dayEditCartLines.length === 0 ? (
+                    <p className="empty small-empty">날짜에 추가할 상품을 선택하세요.</p>
+                  ) : (
+                    dayEditCartLines.map((item) => (
+                      <div className="cart-line" key={item!.product.id}>
+                        <div>
+                          <strong>{item!.product.name}</strong>
+                          <span>{money(item!.product.price)}</span>
+                        </div>
+                        <div className="stepper">
+                          <button onClick={() => changeDayEditQuantity(item!.product.id, item!.quantity - 1)} type="button">
+                            -
+                          </button>
+                          <input
+                            aria-label={`${item!.product.name} 날짜 추가 수량`}
+                            min="1"
+                            onChange={(event) => changeDayEditQuantity(item!.product.id, Number(event.target.value))}
+                            type="number"
+                            value={item!.quantity}
+                          />
+                          <button onClick={() => changeDayEditQuantity(item!.product.id, item!.quantity + 1)} type="button">
+                            +
+                          </button>
+                        </div>
+                        <b>{money(item!.total)}</b>
+                      </div>
+                    ))
+                  )}
+                </div>
+                <div className="payment-toggle" aria-label="날짜 추가 결제수단 선택">
+                  <button className={dayEditPaymentMethod === "card" ? "active" : ""} onClick={() => setDayEditPaymentMethod("card")} type="button">
+                    카드
+                  </button>
+                  <button className={dayEditPaymentMethod === "cash" ? "active" : ""} onClick={() => setDayEditPaymentMethod("cash")} type="button">
+                    현금
+                  </button>
+                  <button
+                    className={dayEditPaymentMethod === "transfer" ? "active" : ""}
+                    onClick={() => setDayEditPaymentMethod("transfer")}
+                    type="button"
+                  >
+                    이체
+                  </button>
+                </div>
+                <div className="day-edit-total">
+                  <span>추가 합계</span>
+                  <strong>{money(dayEditCartTotal)}</strong>
+                </div>
+                <button className="primary-button" onClick={addDayEditCartToRecord} type="button">
+                  {selectedCalendarDate}에 추가
+                </button>
+              </section>
             </div>
+            {(selectedDayRecord?.lines?.length ?? 0) > 0 ? (
+              <div className="day-record-lines">
+                <strong>추가된 품목</strong>
+                {selectedDayRecord!.lines!.map((line) => (
+                  <div key={line.id}>
+                    <span>
+                      {line.name} {line.quantity}개
+                    </span>
+                    <small>
+                      {paymentLabels[line.paymentMethod]} · {money(line.total)}
+                    </small>
+                    <button onClick={() => removeDayRecordLine(line.id)} type="button">
+                      삭제
+                    </button>
+                  </div>
+                ))}
+              </div>
+            ) : null}
             <label className="day-note-field">
               메모
               <textarea
                 placeholder="해당 날짜에 남길 내용"
                 value={selectedDayRecord?.note ?? ""}
-                onChange={(event) => updateDayRecord(selectedCalendarDate, { note: event.target.value })}
+                onChange={(event) => updateDayRecordNote(selectedCalendarDate, event.target.value)}
               />
             </label>
           </div>
