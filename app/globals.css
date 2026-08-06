@@ -67,6 +67,30 @@ input:disabled {
   margin-bottom: 16px;
 }
 
+.module-tabs {
+  display: flex;
+  gap: 8px;
+  margin: 0 0 16px;
+  overflow-x: auto;
+}
+
+.module-tabs button {
+  min-height: 42px;
+  padding: 0 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #ffffff;
+  color: var(--foreground);
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.module-tabs button.active {
+  border-color: var(--primary);
+  background: #ccfbf1;
+  color: var(--primary-dark);
+}
+
 .eyebrow {
   margin: 0 0 4px;
   color: var(--primary);
@@ -137,6 +161,10 @@ h2 {
   display: block;
   margin-top: 3px;
   font-size: 22px;
+}
+
+.inline-summary {
+  grid-template-columns: repeat(2, minmax(140px, 1fr));
 }
 
 .sync-pill {
@@ -621,6 +649,23 @@ textarea {
   background: #fbfdff;
 }
 
+.compact-list > div {
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
+}
+
+.edit-product-row {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: minmax(120px, 1fr) 120px 140px auto auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.edit-product-row input,
+.edit-product-row select {
+  min-height: 36px;
+}
+
 .compact-list button,
 .category-list button {
   border: 0;
@@ -629,12 +674,40 @@ textarea {
   font-weight: 800;
 }
 
+.compact-list .edit-product-row button:first-of-type {
+  color: var(--primary);
+}
+
 .category-list > div {
   grid-template-columns: 18px minmax(0, 1fr) auto;
 }
 
 .rank-list > div {
   grid-template-columns: 34px minmax(0, 1fr) auto;
+}
+
+.address-form {
+  grid-template-columns: minmax(110px, 1fr) minmax(120px, 1fr) minmax(180px, 2fr) 88px;
+}
+
+.address-list > div {
+  grid-template-columns: minmax(100px, 1fr) minmax(110px, 1fr) minmax(160px, 2fr) auto;
+}
+
+.reservation-page {
+  grid-template-columns: minmax(0, 2fr) minmax(320px, 1fr);
+}
+
+.reservation-page .settlement-panel {
+  grid-column: auto;
+}
+
+.reservation-page .day-record-lines > div:not(.day-record-lines-head) {
+  grid-template-columns: minmax(0, 1fr) minmax(120px, auto) auto auto;
+}
+
+.purchase-tile {
+  border-color: #bfd8c7;
 }
 
 .rank-list b {
@@ -975,7 +1048,11 @@ textarea {
   .summary-strip,
   .payment-toggle,
   .form-grid,
-  .inline-form {
+  .inline-form,
+  .address-form,
+  .address-list > div,
+  .edit-product-row,
+  .reservation-page .day-record-lines > div:not(.day-record-lines-head) {
     grid-template-columns: 1fr;
   }
 

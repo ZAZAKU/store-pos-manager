@@ -45,6 +45,15 @@ type Sale = {
   total: number;
 };
 
+type Purchase = {
+  id: string;
+  purchasedAt: string;
+  cancelledAt?: string;
+  memo: string;
+  lines: SaleLine[];
+  total: number;
+};
+
 type DayRecord = {
   date: string;
   note: string;
@@ -54,19 +63,44 @@ type DayRecord = {
   lines?: DayRecordLine[];
 };
 
+type Customer = {
+  id: string;
+  name: string;
+  phone: string;
+  address: string;
+};
+
+type Reservation = {
+  id: string;
+  date: string;
+  customerId: string;
+  customerName: string;
+  customerPhone: string;
+  customerAddress: string;
+  memo: string;
+  paymentMethod: PaymentMethod;
+  lines: DayRecordLine[];
+  total: number;
+  completedAt?: string;
+};
+
 type RankItem = {
   name: string;
   quantity: number;
   total: number;
 };
 
+type AppView = "sales" | "purchase" | "reservation";
 type ProductSort = "createdDesc" | "createdAsc" | "nameAsc" | "nameDesc" | "priceAsc" | "priceDesc";
 
 type StoredData = {
   categories?: Category[];
   products?: Product[];
   sales?: Sale[];
+  purchases?: Purchase[];
   dayRecords?: DayRecord[];
+  customers?: Customer[];
+  reservations?: Reservation[];
   activeCategory?: string;
   productSort?: ProductSort;
   updatedAt?: string;
@@ -185,6 +219,38 @@ function normalizeSales(sales: Sale[] = []) {
   }));
 }
 
+function normalizePurchases(purchases: Purchase[] = []) {
+  return purchases.map((purchase) => ({
+    ...purchase,
+    memo: purchase.memo ?? "",
+    lines: purchase.lines ?? [],
+    total: Number(purchase.total) || 0,
+  }));
+}
+
+function normalizeCustomers(customers: Customer[] = []) {
+  return customers.map((customer) => ({
+    id: customer.id ?? makeId("customer"),
+    name: customer.name ?? "",
+    phone: customer.phone ?? "",
+    address: customer.address ?? "",
+  }));
+}
+
+function normalizeReservations(reservations: Reservation[] = []) {
+  return reservations.map((reservation) => ({
+    ...reservation,
+    memo: reservation.memo ?? "",
+    paymentMethod: reservation.paymentMethod ?? "card",
+    lines: (reservation.lines ?? []).map((line) => ({
+      ...line,
+      id: line.id ?? makeId("reservation-line"),
+      paymentMethod: line.paymentMethod ?? reservation.paymentMethod ?? "card",
+    })),
+    total: Number(reservation.total) || 0,
+  }));
+}
+
 function normalizeDayRecords(records: DayRecord[] = []) {
   return records
     .filter((record) => record.date)
@@ -265,7 +331,10 @@ function normalizeStoredData(parsed: StoredData) {
     categories,
     products: parsed.products?.length ? parsed.products : seedProducts,
     sales: normalizeSales(parsed.sales ?? []),
+    purchases: normalizePurchases(parsed.purchases ?? []),
     dayRecords: normalizeDayRecords(parsed.dayRecords ?? []),
+    customers: normalizeCustomers(parsed.customers ?? []),
+    reservations: normalizeReservations(parsed.reservations ?? []),
     activeCategory,
     productSort: parsed.productSort ?? "createdDesc",
     updatedAt: parsed.updatedAt ?? "",
@@ -279,12 +348,18 @@ function makeStoredData(
   activeCategory = "all",
   dayRecords: DayRecord[] = [],
   productSort: ProductSort = "createdDesc",
+  purchases: Purchase[] = [],
+  customers: Customer[] = [],
+  reservations: Reservation[] = [],
 ): Required<StoredData> {
   return {
     categories,
     products,
     sales,
+    purchases,
     dayRecords,
+    customers,
+    reservations,
     activeCategory,
     productSort,
     updatedAt: new Date().toISOString(),
@@ -311,10 +386,13 @@ function writeStoredData(
   activeCategory = "all",
   dayRecords: DayRecord[] = [],
   productSort: ProductSort = "createdDesc",
+  purchases: Purchase[] = [],
+  customers: Customer[] = [],
+  reservations: Reservation[] = [],
 ) {
   if (typeof window === "undefined") return null;
   try {
-    const data = makeStoredData(categories, products, sales, activeCategory, dayRecords, productSort);
+    const data = makeStoredData(categories, products, sales, activeCategory, dayRecords, productSort, purchases, customers, reservations);
     const payload = JSON.stringify(data);
     localStorage.setItem(STORAGE_KEY, payload);
     localStorage.setItem(STORAGE_BACKUP_KEY, payload);
@@ -373,15 +451,30 @@ function downloadExcel(filename: string, rows: Array<Array<string | number>>) {
 }
 
 export default function Home() {
+  const [activeView, setActiveView] = useState<AppView>("sales");
   const [categories, setCategories] = useState<Category[]>(seedCategories);
   const [products, setProducts] = useState<Product[]>(seedProducts);
   const [sales, setSales] = useState<Sale[]>([]);
+  const [purchases, setPurchases] = useState<Purchase[]>([]);
   const [dayRecords, setDayRecords] = useState<DayRecord[]>([]);
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [reservations, setReservations] = useState<Reservation[]>([]);
   const [cart, setCart] = useState<CartItem[]>([]);
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("card");
+  const [purchaseCart, setPurchaseCart] = useState<CartItem[]>([]);
+  const [purchaseMemo, setPurchaseMemo] = useState("");
   const [dayEditCart, setDayEditCart] = useState<CartItem[]>([]);
   const [dayEditPaymentMethod, setDayEditPaymentMethod] = useState<PaymentMethod>("card");
   const [dayEditCategory, setDayEditCategory] = useState("all");
+  const [reservationCart, setReservationCart] = useState<CartItem[]>([]);
+  const [reservationCategory, setReservationCategory] = useState("all");
+  const [reservationPaymentMethod, setReservationPaymentMethod] = useState<PaymentMethod>("card");
+  const [selectedReservationDate, setSelectedReservationDate] = useState(dateKey(new Date()));
+  const [reservationMonth, setReservationMonth] = useState(monthKey(new Date()));
+  const [customerForm, setCustomerForm] = useState({ name: "", phone: "", address: "" });
+  const [reservationForm, setReservationForm] = useState({ customerId: "", memo: "" });
+  const [editingProductId, setEditingProductId] = useState("");
+  const [productEditForm, setProductEditForm] = useState({ name: "", price: "", categoryId: seedCategories[0].id });
   const [dayEditOpen, setDayEditOpen] = useState(true);
   const [dayRecordLinesOpen, setDayRecordLinesOpen] = useState(true);
   const [activeCategory, setActiveCategory] = useState("all");
@@ -401,7 +494,10 @@ export default function Home() {
     setCategories(data.categories);
     setProducts(data.products);
     setSales(data.sales);
+    setPurchases(data.purchases);
     setDayRecords(data.dayRecords);
+    setCustomers(data.customers);
+    setReservations(data.reservations);
     setActiveCategory(data.activeCategory);
     setProductSort(data.productSort);
     setLastSavedAt(data.updatedAt);
@@ -453,7 +549,7 @@ export default function Home() {
 
   useEffect(() => {
     if (!ready) return;
-    const saved = writeStoredData(categories, products, sales, activeCategory, dayRecords, productSort);
+    const saved = writeStoredData(categories, products, sales, activeCategory, dayRecords, productSort, purchases, customers, reservations);
     if (!saved) {
       setNotice("브라우저 저장소를 사용할 수 없습니다. 시크릿 모드나 저장소 차단 설정을 확인해 주세요.");
       return;
@@ -462,7 +558,7 @@ export default function Home() {
     writeCloudData(saved).then((uploaded) => {
       setSyncState(uploaded ? "cloud" : "local");
     });
-  }, [activeCategory, categories, dayRecords, productSort, products, sales, ready]);
+  }, [activeCategory, categories, customers, dayRecords, productSort, products, purchases, ready, reservations, sales]);
 
   useEffect(() => {
     if (!ready) return;
@@ -495,7 +591,7 @@ export default function Home() {
   useEffect(() => {
     if (!ready) return;
     const persistBeforeClose = () => {
-      writeStoredData(categories, products, sales, activeCategory, dayRecords, productSort);
+      writeStoredData(categories, products, sales, activeCategory, dayRecords, productSort, purchases, customers, reservations);
     };
     const persistWhenHidden = () => {
       if (document.visibilityState === "hidden") persistBeforeClose();
@@ -508,7 +604,7 @@ export default function Home() {
       window.removeEventListener("pagehide", persistBeforeClose);
       document.removeEventListener("visibilitychange", persistWhenHidden);
     };
-  }, [activeCategory, categories, dayRecords, productSort, products, sales, ready]);
+  }, [activeCategory, categories, customers, dayRecords, productSort, products, purchases, ready, reservations, sales]);
 
   const activeSales = useMemo(() => sales.filter((sale) => !sale.cancelledAt), [sales]);
   const recentSales = sales.slice(0, 8);
@@ -522,6 +618,10 @@ export default function Home() {
   const visibleDayEditProducts = useMemo(
     () => sortProducts(products.filter((product) => dayEditCategory === "all" || product.categoryId === dayEditCategory), productSort),
     [dayEditCategory, productSort, products],
+  );
+  const visibleReservationProducts = useMemo(
+    () => sortProducts(products.filter((product) => reservationCategory === "all" || product.categoryId === reservationCategory), productSort),
+    [productSort, products, reservationCategory],
   );
   const sortedProducts = useMemo(() => sortProducts(products, productSort), [productSort, products]);
 
@@ -544,6 +644,24 @@ export default function Home() {
   );
 
   const cartTotal = cartLines.reduce((sum, item) => sum + (item?.total ?? 0), 0);
+  const purchaseCartLines = useMemo(
+    () =>
+      purchaseCart
+        .map((item) => {
+          const product = products.find((entry) => entry.id === item.productId);
+          if (!product) return null;
+          const category = categoryMap.get(product.categoryId);
+          return {
+            ...item,
+            product,
+            categoryName: category?.name ?? "미분류",
+            total: product.price * item.quantity,
+          };
+        })
+        .filter(Boolean),
+    [categoryMap, products, purchaseCart],
+  );
+  const purchaseCartTotal = purchaseCartLines.reduce((sum, item) => sum + (item?.total ?? 0), 0);
   const dayEditCartLines = useMemo(
     () =>
       dayEditCart
@@ -562,6 +680,46 @@ export default function Home() {
     [categoryMap, dayEditCart, products],
   );
   const dayEditCartTotal = dayEditCartLines.reduce((sum, item) => sum + (item?.total ?? 0), 0);
+  const reservationCartLines = useMemo(
+    () =>
+      reservationCart
+        .map((item) => {
+          const product = products.find((entry) => entry.id === item.productId);
+          if (!product) return null;
+          const category = categoryMap.get(product.categoryId);
+          return {
+            ...item,
+            product,
+            categoryName: category?.name ?? "미분류",
+            total: product.price * item.quantity,
+          };
+        })
+        .filter(Boolean),
+    [categoryMap, products, reservationCart],
+  );
+  const reservationCartTotal = reservationCartLines.reduce((sum, item) => sum + (item?.total ?? 0), 0);
+  const activePurchases = useMemo(() => purchases.filter((purchase) => !purchase.cancelledAt), [purchases]);
+  const recentPurchases = purchases.slice(0, 8);
+  const todayPurchaseTotal = activePurchases
+    .filter((purchase) => dateKey(new Date(purchase.purchasedAt)) === dateKey(new Date()))
+    .reduce((sum, purchase) => sum + purchase.total, 0);
+  const selectedPurchaseMonthTotal = activePurchases
+    .filter((purchase) => monthKey(new Date(purchase.purchasedAt)) === selectedMonth)
+    .reduce((sum, purchase) => sum + purchase.total, 0);
+  const selectedReservationItems = reservations.filter((reservation) => reservation.date === selectedReservationDate);
+  const reservationCalendarCells = [
+    ...Array.from({ length: new Date(Number(reservationMonth.slice(0, 4)), Number(reservationMonth.slice(5, 7)) - 1, 1).getDay() }).map((_, index) => ({
+      type: "blank" as const,
+      key: `reservation-blank-${index}`,
+    })),
+    ...Array.from({ length: new Date(Number(reservationMonth.slice(0, 4)), Number(reservationMonth.slice(5, 7)), 0).getDate() }).map((_, index) => {
+      const day = index + 1;
+      const key = `${reservationMonth}-${String(day).padStart(2, "0")}`;
+      const dayReservations = reservations.filter((reservation) => reservation.date === key);
+      const total = dayReservations.reduce((sum, reservation) => sum + reservation.total, 0);
+      return { type: "day" as const, key, day, count: dayReservations.length, total };
+    }),
+  ];
   const todayRecord = dayRecordMap.get(dateKey(new Date()));
   const todayTotal = activeSales
     .filter((sale) => dateKey(new Date(sale.soldAt)) === dateKey(new Date()))
@@ -656,6 +814,22 @@ export default function Home() {
     });
   }
 
+  function addToPurchaseCart(productId: string) {
+    setPurchaseCart((items) => {
+      const existing = items.find((item) => item.productId === productId);
+      if (existing) return items.map((item) => (item.productId === productId ? { ...item, quantity: item.quantity + 1 } : item));
+      return [...items, { productId, quantity: 1 }];
+    });
+  }
+
+  function addToReservationCart(productId: string) {
+    setReservationCart((items) => {
+      const existing = items.find((item) => item.productId === productId);
+      if (existing) return items.map((item) => (item.productId === productId ? { ...item, quantity: item.quantity + 1 } : item));
+      return [...items, { productId, quantity: 1 }];
+    });
+  }
+
   function changeQuantity(productId: string, quantity: number) {
     if (quantity <= 0) {
       setCart((items) => items.filter((item) => item.productId !== productId));
@@ -670,6 +844,22 @@ export default function Home() {
       return;
     }
     setDayEditCart((items) => items.map((item) => (item.productId === productId ? { ...item, quantity } : item)));
+  }
+
+  function changePurchaseQuantity(productId: string, quantity: number) {
+    if (quantity <= 0) {
+      setPurchaseCart((items) => items.filter((item) => item.productId !== productId));
+      return;
+    }
+    setPurchaseCart((items) => items.map((item) => (item.productId === productId ? { ...item, quantity } : item)));
+  }
+
+  function changeReservationQuantity(productId: string, quantity: number) {
+    if (quantity <= 0) {
+      setReservationCart((items) => items.filter((item) => item.productId !== productId));
+      return;
+    }
+    setReservationCart((items) => items.map((item) => (item.productId === productId ? { ...item, quantity } : item)));
   }
 
   function checkout() {
@@ -694,7 +884,7 @@ export default function Home() {
     };
     const nextSales = [sale, ...sales];
     setSales(nextSales);
-    writeStoredData(categories, products, nextSales, activeCategory, dayRecords, productSort);
+    writeStoredData(categories, products, nextSales, activeCategory, dayRecords, productSort, purchases, customers, reservations);
     setCart([]);
     setNotice(`${paymentLabels[paymentMethod]} ${money(sale.total)} 결제가 기록되었습니다. 잘못 눌렀다면 최근 계산 내역에서 취소하세요.`);
   }
@@ -704,8 +894,45 @@ export default function Home() {
     if (!sale || sale.cancelledAt) return;
     const nextSales = sales.map((entry) => (entry.id === saleId ? { ...entry, cancelledAt: new Date().toISOString() } : entry));
     setSales(nextSales);
-    writeStoredData(categories, products, nextSales, activeCategory, dayRecords, productSort);
+    writeStoredData(categories, products, nextSales, activeCategory, dayRecords, productSort, purchases, customers, reservations);
     setNotice(`${timeFormatter.format(new Date(sale.soldAt))} 결제 ${money(sale.total)}를 취소했습니다.`);
+  }
+
+  function recordPurchase() {
+    if (!purchaseCartLines.length) {
+      setNotice("매입할 상품을 선택해 주세요.");
+      return;
+    }
+    const lines: SaleLine[] = purchaseCartLines.map((item) => ({
+      productId: item!.product.id,
+      name: item!.product.name,
+      categoryName: item!.categoryName,
+      price: item!.product.price,
+      quantity: item!.quantity,
+      total: item!.total,
+    }));
+    const purchase: Purchase = {
+      id: makeId("purchase"),
+      purchasedAt: new Date().toISOString(),
+      memo: purchaseMemo.trim(),
+      lines,
+      total: lines.reduce((sum, line) => sum + line.total, 0),
+    };
+    const nextPurchases = [purchase, ...purchases];
+    setPurchases(nextPurchases);
+    setPurchaseCart([]);
+    setPurchaseMemo("");
+    writeStoredData(categories, products, sales, activeCategory, dayRecords, productSort, nextPurchases, customers, reservations);
+    setNotice(`매입 ${money(purchase.total)}를 기록했습니다.`);
+  }
+
+  function cancelPurchase(purchaseId: string) {
+    const purchase = purchases.find((entry) => entry.id === purchaseId);
+    if (!purchase || purchase.cancelledAt) return;
+    const nextPurchases = purchases.map((entry) => (entry.id === purchaseId ? { ...entry, cancelledAt: new Date().toISOString() } : entry));
+    setPurchases(nextPurchases);
+    writeStoredData(categories, products, sales, activeCategory, dayRecords, productSort, nextPurchases, customers, reservations);
+    setNotice(`매입 ${money(purchase.total)}를 취소했습니다.`);
   }
 
   function addProduct(event: FormEvent<HTMLFormElement>) {
@@ -718,9 +945,30 @@ export default function Home() {
     }
     const nextProducts = [{ id: makeId("prod"), name, price: Math.round(price), categoryId: productForm.categoryId }, ...products];
     setProducts(nextProducts);
-    writeStoredData(categories, nextProducts, sales, activeCategory, dayRecords, productSort);
+    writeStoredData(categories, nextProducts, sales, activeCategory, dayRecords, productSort, purchases, customers, reservations);
     setProductForm({ name: "", price: "", categoryId: productForm.categoryId });
     setNotice(`${name} 상품을 등록했습니다.`);
+  }
+
+  function beginEditProduct(product: Product) {
+    setEditingProductId(product.id);
+    setProductEditForm({ name: product.name, price: String(product.price), categoryId: product.categoryId });
+  }
+
+  function saveProductEdit(productId: string) {
+    const name = productEditForm.name.trim();
+    const price = Number(productEditForm.price);
+    if (!name || !Number.isFinite(price) || price <= 0) {
+      setNotice("수정할 상품명과 0원보다 큰 가격을 입력해 주세요.");
+      return;
+    }
+    const nextProducts = products.map((product) =>
+      product.id === productId ? { ...product, name, price: Math.round(price), categoryId: productEditForm.categoryId } : product,
+    );
+    setProducts(nextProducts);
+    setEditingProductId("");
+    writeStoredData(categories, nextProducts, sales, activeCategory, dayRecords, productSort, purchases, customers, reservations);
+    setNotice(`${name} 상품을 수정했습니다.`);
   }
 
   function addCategory(event: FormEvent<HTMLFormElement>) {
@@ -740,16 +988,18 @@ export default function Home() {
     setActiveCategory(category.id);
     setProductForm((current) => ({ ...current, categoryId: category.id }));
     setCategoryForm("");
-    writeStoredData(nextCategories, products, sales, category.id, dayRecords, productSort);
+    writeStoredData(nextCategories, products, sales, category.id, dayRecords, productSort, purchases, customers, reservations);
     setNotice(`${name} 카테고리를 추가했습니다. 현재 ${categories.length + 1}/${MAX_CATEGORIES}개입니다.`);
   }
 
   function deleteProduct(productId: string) {
     const nextProducts = products.filter((item) => item.id !== productId);
     setProducts(nextProducts);
-    writeStoredData(categories, nextProducts, sales, activeCategory, dayRecords, productSort);
+    writeStoredData(categories, nextProducts, sales, activeCategory, dayRecords, productSort, purchases, customers, reservations);
     setCart((items) => items.filter((item) => item.productId !== productId));
     setDayEditCart((items) => items.filter((item) => item.productId !== productId));
+    setPurchaseCart((items) => items.filter((item) => item.productId !== productId));
+    setReservationCart((items) => items.filter((item) => item.productId !== productId));
   }
 
   function deleteCategory(categoryId: string) {
@@ -763,23 +1013,23 @@ export default function Home() {
     setProducts(nextProducts);
     setCategories(nextCategories);
     setActiveCategory("all");
-    writeStoredData(nextCategories, nextProducts, sales, "all", dayRecords, productSort);
+    writeStoredData(nextCategories, nextProducts, sales, "all", dayRecords, productSort, purchases, customers, reservations);
   }
 
   function renameCategory(categoryId: string, name: string) {
     const nextCategories = categories.map((item) => (item.id === categoryId ? { ...item, name } : item));
     setCategories(nextCategories);
-    writeStoredData(nextCategories, products, sales, activeCategory, dayRecords, productSort);
+    writeStoredData(nextCategories, products, sales, activeCategory, dayRecords, productSort, purchases, customers, reservations);
   }
 
   function selectCategory(categoryId: string) {
     setActiveCategory(categoryId);
-    writeStoredData(categories, products, sales, categoryId, dayRecords, productSort);
+    writeStoredData(categories, products, sales, categoryId, dayRecords, productSort, purchases, customers, reservations);
   }
 
   function changeProductSort(sort: ProductSort) {
     setProductSort(sort);
-    writeStoredData(categories, products, sales, activeCategory, dayRecords, sort);
+    writeStoredData(categories, products, sales, activeCategory, dayRecords, sort, purchases, customers, reservations);
   }
 
   function selectCalendarDate(date: string) {
@@ -801,7 +1051,7 @@ export default function Home() {
       ? [...dayRecords.filter((record) => record.date !== date), nextRecord].sort((a, b) => a.date.localeCompare(b.date))
       : dayRecords.filter((record) => record.date !== date);
     setDayRecords(nextRecords);
-    writeStoredData(categories, products, sales, activeCategory, nextRecords, productSort);
+    writeStoredData(categories, products, sales, activeCategory, nextRecords, productSort, purchases, customers, reservations);
   }
 
   function updateDayRecordNote(date: string, note: string) {
@@ -854,6 +1104,113 @@ export default function Home() {
       lines,
     });
     setNotice(`${selectedCalendarDate} 내역을 수정했습니다.`);
+  }
+
+  function selectReservationDate(date: string) {
+    setSelectedReservationDate(date);
+    setReservationMonth(date.slice(0, 7));
+    setReservationCart([]);
+  }
+
+  function changeReservationMonth(month: string) {
+    setReservationMonth(month);
+    if (!selectedReservationDate.startsWith(month)) {
+      setSelectedReservationDate(`${month}-01`);
+    }
+  }
+
+  function addCustomer(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const name = customerForm.name.trim();
+    if (!name) {
+      setNotice("회원 이름을 입력해 주세요.");
+      return;
+    }
+    const customer: Customer = { id: makeId("customer"), name, phone: customerForm.phone.trim(), address: customerForm.address.trim() };
+    const nextCustomers = [customer, ...customers];
+    setCustomers(nextCustomers);
+    setReservationForm((current) => ({ ...current, customerId: customer.id }));
+    setCustomerForm({ name: "", phone: "", address: "" });
+    writeStoredData(categories, products, sales, activeCategory, dayRecords, productSort, purchases, nextCustomers, reservations);
+    setNotice(`${name} 회원을 주소록에 추가했습니다.`);
+  }
+
+  function updateCustomer(customerId: string, field: keyof Omit<Customer, "id">, value: string) {
+    const nextCustomers = customers.map((customer) => (customer.id === customerId ? { ...customer, [field]: value } : customer));
+    setCustomers(nextCustomers);
+    writeStoredData(categories, products, sales, activeCategory, dayRecords, productSort, purchases, nextCustomers, reservations);
+  }
+
+  function deleteCustomer(customerId: string) {
+    const nextCustomers = customers.filter((customer) => customer.id !== customerId);
+    setCustomers(nextCustomers);
+    if (reservationForm.customerId === customerId) setReservationForm((current) => ({ ...current, customerId: "" }));
+    writeStoredData(categories, products, sales, activeCategory, dayRecords, productSort, purchases, nextCustomers, reservations);
+  }
+
+  function saveReservation() {
+    if (!reservationCartLines.length) {
+      setNotice("예약할 상품을 선택해 주세요.");
+      return;
+    }
+    const selectedCustomer = customers.find((customer) => customer.id === reservationForm.customerId);
+    if (!selectedCustomer) {
+      setNotice("예약 회원을 주소록에서 선택해 주세요.");
+      return;
+    }
+    const lines: DayRecordLine[] = reservationCartLines.map((item) => ({
+      id: makeId("reservation-line"),
+      productId: item!.product.id,
+      name: item!.product.name,
+      categoryName: item!.categoryName,
+      price: item!.product.price,
+      quantity: item!.quantity,
+      total: item!.total,
+      paymentMethod: reservationPaymentMethod,
+    }));
+    const reservation: Reservation = {
+      id: makeId("reservation"),
+      date: selectedReservationDate,
+      customerId: selectedCustomer.id,
+      customerName: selectedCustomer.name,
+      customerPhone: selectedCustomer.phone,
+      customerAddress: selectedCustomer.address,
+      memo: reservationForm.memo.trim(),
+      paymentMethod: reservationPaymentMethod,
+      lines,
+      total: lines.reduce((sum, line) => sum + line.total, 0),
+    };
+    const nextReservations = [reservation, ...reservations];
+    setReservations(nextReservations);
+    setReservationCart([]);
+    setReservationForm((current) => ({ ...current, memo: "" }));
+    writeStoredData(categories, products, sales, activeCategory, dayRecords, productSort, purchases, customers, nextReservations);
+    setNotice(`${selectedReservationDate} 예약을 저장했습니다.`);
+  }
+
+  function deleteReservation(reservationId: string) {
+    const nextReservations = reservations.filter((reservation) => reservation.id !== reservationId);
+    setReservations(nextReservations);
+    writeStoredData(categories, products, sales, activeCategory, dayRecords, productSort, purchases, customers, nextReservations);
+    setNotice("예약을 삭제했습니다.");
+  }
+
+  function completeReservation(reservationId: string) {
+    const reservation = reservations.find((entry) => entry.id === reservationId);
+    if (!reservation || reservation.completedAt) return;
+    const sale: Sale = {
+      id: makeId("sale"),
+      soldAt: new Date().toISOString(),
+      paymentMethod: reservation.paymentMethod,
+      lines: reservation.lines.map(({ id, paymentMethod: _paymentMethod, ...line }) => line),
+      total: reservation.total,
+    };
+    const nextSales = [sale, ...sales];
+    const nextReservations = reservations.map((entry) => (entry.id === reservationId ? { ...entry, completedAt: sale.soldAt } : entry));
+    setSales(nextSales);
+    setReservations(nextReservations);
+    writeStoredData(categories, products, nextSales, activeCategory, dayRecords, productSort, purchases, customers, nextReservations);
+    setNotice(`${reservation.customerName} 예약을 계산 완료하고 매출에 반영했습니다.`);
   }
 
   function exportSales() {
@@ -1000,6 +1357,20 @@ export default function Home() {
         </div>
       </section>
 
+      <nav className="module-tabs" aria-label="관리 화면 이동">
+        <button className={activeView === "sales" ? "active" : ""} onClick={() => setActiveView("sales")} type="button">
+          매출관리
+        </button>
+        <button className={activeView === "purchase" ? "active" : ""} onClick={() => setActiveView("purchase")} type="button">
+          매입관리
+        </button>
+        <button className={activeView === "reservation" ? "active" : ""} onClick={() => setActiveView("reservation")} type="button">
+          예약·배송관리
+        </button>
+      </nav>
+
+      {activeView === "sales" ? (
+        <>
       <section className="workspace">
         <div className="catalog-panel">
           <div className="panel-head">
@@ -1179,11 +1550,50 @@ export default function Home() {
           <div className="compact-list">
             {sortedProducts.map((product) => (
               <div key={product.id}>
-                <span>{product.name}</span>
-                <small>{money(product.price)}</small>
-                <button onClick={() => deleteProduct(product.id)} type="button">
-                  삭제
-                </button>
+                {editingProductId === product.id ? (
+                  <div className="edit-product-row">
+                    <input
+                      aria-label={`${product.name} 상품명 수정`}
+                      value={productEditForm.name}
+                      onChange={(event) => setProductEditForm({ ...productEditForm, name: event.target.value })}
+                    />
+                    <input
+                      aria-label={`${product.name} 가격 수정`}
+                      inputMode="numeric"
+                      type="number"
+                      value={productEditForm.price}
+                      onChange={(event) => setProductEditForm({ ...productEditForm, price: event.target.value })}
+                    />
+                    <select
+                      aria-label={`${product.name} 카테고리 수정`}
+                      value={productEditForm.categoryId}
+                      onChange={(event) => setProductEditForm({ ...productEditForm, categoryId: event.target.value })}
+                    >
+                      {categories.map((category) => (
+                        <option key={category.id} value={category.id}>
+                          {category.name}
+                        </option>
+                      ))}
+                    </select>
+                    <button onClick={() => saveProductEdit(product.id)} type="button">
+                      저장
+                    </button>
+                    <button onClick={() => setEditingProductId("")} type="button">
+                      취소
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <span>{product.name}</span>
+                    <small>{money(product.price)}</small>
+                    <button onClick={() => beginEditProduct(product)} type="button">
+                      수정
+                    </button>
+                    <button onClick={() => deleteProduct(product.id)} type="button">
+                      삭제
+                    </button>
+                  </>
+                )}
               </div>
             ))}
           </div>
@@ -1463,6 +1873,367 @@ export default function Home() {
           </div>
         </div>
       </section>
+        </>
+      ) : null}
+
+      {activeView === "purchase" ? (
+        <section className="workspace module-page">
+          <div className="catalog-panel">
+            <div className="panel-head">
+              <div>
+                <p className="eyebrow">Purchase</p>
+                <h2>매입 상품 선택</h2>
+              </div>
+              <span className="notice">{notice}</span>
+            </div>
+            <div className="category-tabs" aria-label="매입 카테고리 필터">
+              <button className={activeCategory === "all" ? "active" : ""} onClick={() => selectCategory("all")} type="button">
+                전체
+              </button>
+              {categories.map((category) => (
+                <button
+                  className={activeCategory === category.id ? "active" : ""}
+                  key={category.id}
+                  onClick={() => selectCategory(category.id)}
+                  style={{ "--accent": category.color } as React.CSSProperties}
+                  type="button"
+                >
+                  {category.name}
+                </button>
+              ))}
+            </div>
+            <div className="product-grid">
+              {visibleProducts.map((product) => {
+                const category = categoryMap.get(product.categoryId);
+                return (
+                  <button className="product-tile purchase-tile" key={product.id} onClick={() => addToPurchaseCart(product.id)} type="button">
+                    <span className="swatch" style={{ background: category?.color }} />
+                    <strong>{product.name}</strong>
+                    <small>{category?.name ?? "미분류"}</small>
+                    <b>{money(product.price)}</b>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <aside className="cart-panel">
+            <div className="panel-head">
+              <div>
+                <p className="eyebrow">Purchase Cart</p>
+                <h2>매입 기록</h2>
+              </div>
+              <button className="text-button" onClick={() => setPurchaseCart([])} type="button">
+                비우기
+              </button>
+            </div>
+            <div className="cart-list">
+              {purchaseCartLines.length === 0 ? (
+                <p className="empty">매입할 상품을 누르면 여기에 담깁니다.</p>
+              ) : (
+                purchaseCartLines.map((item) => (
+                  <div className="cart-line" key={item!.product.id}>
+                    <div>
+                      <strong>{item!.product.name}</strong>
+                      <span>{money(item!.product.price)}</span>
+                    </div>
+                    <div className="stepper">
+                      <button onClick={() => changePurchaseQuantity(item!.product.id, item!.quantity - 1)} type="button">
+                        -
+                      </button>
+                      <input
+                        aria-label={`${item!.product.name} 매입 수량`}
+                        min="1"
+                        onChange={(event) => changePurchaseQuantity(item!.product.id, Number(event.target.value))}
+                        type="number"
+                        value={item!.quantity}
+                      />
+                      <button onClick={() => changePurchaseQuantity(item!.product.id, item!.quantity + 1)} type="button">
+                        +
+                      </button>
+                    </div>
+                    <b>{money(item!.total)}</b>
+                  </div>
+                ))
+              )}
+            </div>
+            <div className="checkout-box">
+              <span>매입 합계</span>
+              <strong>{money(purchaseCartTotal)}</strong>
+              <textarea placeholder="매입 메모" value={purchaseMemo} onChange={(event) => setPurchaseMemo(event.target.value)} />
+              <button className="primary-button" onClick={recordPurchase} type="button">
+                매입 완료
+              </button>
+            </div>
+            <div className="history-box">
+              <div className="panel-head compact-head">
+                <div>
+                  <p className="eyebrow">Purchase History</p>
+                  <h2>최근 매입 내역</h2>
+                </div>
+              </div>
+              <div className="history-list">
+                {recentPurchases.length === 0 ? (
+                  <p className="empty small-empty">아직 매입 내역이 없습니다.</p>
+                ) : (
+                  recentPurchases.map((purchase) => (
+                    <div className={purchase.cancelledAt ? "sale-row cancelled" : "sale-row"} key={purchase.id}>
+                      <div>
+                        <strong>{money(purchase.total)}</strong>
+                        <span>{timeFormatter.format(new Date(purchase.purchasedAt))}</span>
+                        <small>{purchase.lines.map((line) => `${line.name} ${line.quantity}개`).join(", ")}</small>
+                      </div>
+                      {purchase.cancelledAt ? (
+                        <b className="sale-status">취소됨</b>
+                      ) : (
+                        <button className="danger-button" onClick={() => cancelPurchase(purchase.id)} type="button">
+                          취소
+                        </button>
+                      )}
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          </aside>
+        </section>
+      ) : null}
+
+      {activeView === "purchase" ? (
+        <section className="management-grid">
+          <div className="manage-panel">
+            <div className="panel-head">
+              <div>
+                <p className="eyebrow">Purchase Summary</p>
+                <h2>매입 요약</h2>
+              </div>
+            </div>
+            <div className="summary-strip inline-summary">
+              <div>
+                <span>오늘 매입</span>
+                <strong>{money(todayPurchaseTotal)}</strong>
+              </div>
+              <div>
+                <span>선택 월 매입</span>
+                <strong>{money(selectedPurchaseMonthTotal)}</strong>
+              </div>
+            </div>
+          </div>
+        </section>
+      ) : null}
+
+      {activeView === "reservation" ? (
+        <section className="management-grid reservation-page">
+          <div className="settlement-panel">
+            <div className="panel-head">
+              <div>
+                <p className="eyebrow">Reservation</p>
+                <h2>예약·배송 달력</h2>
+              </div>
+              <input aria-label="예약 월" type="month" value={reservationMonth} onChange={(event) => changeReservationMonth(event.target.value)} />
+            </div>
+            <div className="calendar-weekdays">
+              {["일", "월", "화", "수", "목", "금", "토"].map((day) => (
+                <span key={day}>{day}</span>
+              ))}
+            </div>
+            <div className="calendar-grid">
+              {reservationCalendarCells.map((cell) =>
+                cell.type === "blank" ? (
+                  <div className="calendar-day blank" key={cell.key} />
+                ) : (
+                  <button
+                    className={["calendar-day", cell.count ? "has-sale" : "", selectedReservationDate === cell.key ? "selected" : ""].filter(Boolean).join(" ")}
+                    key={cell.key}
+                    onClick={() => selectReservationDate(cell.key)}
+                    type="button"
+                  >
+                    <span>{cell.day}</span>
+                    <strong>{cell.count ? `${cell.count}건` : ""}</strong>
+                    {cell.total ? <small>{money(cell.total)}</small> : null}
+                  </button>
+                ),
+              )}
+            </div>
+            <div className="day-editor">
+              <div className="day-editor-head">
+                <div>
+                  <p className="eyebrow">Reservation Edit</p>
+                  <h3>{selectedReservationDate} 예약 입력</h3>
+                  <small>예약 {selectedReservationItems.length}건 · 합계 {money(selectedReservationItems.reduce((sum, item) => sum + item.total, 0))}</small>
+                </div>
+              </div>
+              <div className="day-edit-workspace">
+                <section>
+                  <label className="day-note-field">
+                    회원 선택
+                    <select value={reservationForm.customerId} onChange={(event) => setReservationForm({ ...reservationForm, customerId: event.target.value })}>
+                      <option value="">회원 선택</option>
+                      {customers.map((customer) => (
+                        <option key={customer.id} value={customer.id}>
+                          {customer.name} {customer.phone}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <div className="category-tabs compact-tabs" aria-label="예약 카테고리 필터">
+                    <button className={reservationCategory === "all" ? "active" : ""} onClick={() => setReservationCategory("all")} type="button">
+                      전체
+                    </button>
+                    {categories.map((category) => (
+                      <button
+                        className={reservationCategory === category.id ? "active" : ""}
+                        key={category.id}
+                        onClick={() => setReservationCategory(category.id)}
+                        style={{ "--accent": category.color } as React.CSSProperties}
+                        type="button"
+                      >
+                        {category.name}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="day-product-grid">
+                    {visibleReservationProducts.map((product) => {
+                      const category = categoryMap.get(product.categoryId);
+                      return (
+                        <button className="day-product-tile" key={product.id} onClick={() => addToReservationCart(product.id)} type="button">
+                          <span className="swatch" style={{ background: category?.color }} />
+                          <strong>{product.name}</strong>
+                          <small>{category?.name ?? "미분류"}</small>
+                          <b>{money(product.price)}</b>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </section>
+                <section className="day-edit-cart">
+                  <div className="day-edit-cart-head">
+                    <strong>예약 품목</strong>
+                    <button className="text-button" onClick={() => setReservationCart([])} type="button">
+                      비우기
+                    </button>
+                  </div>
+                  <div className="day-edit-lines">
+                    {reservationCartLines.length === 0 ? (
+                      <p className="empty small-empty">예약할 상품을 선택하세요.</p>
+                    ) : (
+                      reservationCartLines.map((item) => (
+                        <div className="cart-line" key={item!.product.id}>
+                          <div>
+                            <strong>{item!.product.name}</strong>
+                            <span>{money(item!.product.price)}</span>
+                          </div>
+                          <div className="stepper">
+                            <button onClick={() => changeReservationQuantity(item!.product.id, item!.quantity - 1)} type="button">
+                              -
+                            </button>
+                            <input
+                              aria-label={`${item!.product.name} 예약 수량`}
+                              min="1"
+                              onChange={(event) => changeReservationQuantity(item!.product.id, Number(event.target.value))}
+                              type="number"
+                              value={item!.quantity}
+                            />
+                            <button onClick={() => changeReservationQuantity(item!.product.id, item!.quantity + 1)} type="button">
+                              +
+                            </button>
+                          </div>
+                          <b>{money(item!.total)}</b>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                  <div className="payment-toggle" aria-label="예약 결제수단 선택">
+                    <button className={reservationPaymentMethod === "card" ? "active" : ""} onClick={() => setReservationPaymentMethod("card")} type="button">
+                      카드
+                    </button>
+                    <button className={reservationPaymentMethod === "cash" ? "active" : ""} onClick={() => setReservationPaymentMethod("cash")} type="button">
+                      현금
+                    </button>
+                    <button className={reservationPaymentMethod === "transfer" ? "active" : ""} onClick={() => setReservationPaymentMethod("transfer")} type="button">
+                      이체
+                    </button>
+                  </div>
+                  <textarea
+                    placeholder="배송/예약 메모"
+                    value={reservationForm.memo}
+                    onChange={(event) => setReservationForm({ ...reservationForm, memo: event.target.value })}
+                  />
+                  <div className="day-edit-total">
+                    <span>예약 합계</span>
+                    <strong>{money(reservationCartTotal)}</strong>
+                  </div>
+                  <button className="primary-button" onClick={saveReservation} type="button">
+                    예약 저장
+                  </button>
+                </section>
+              </div>
+              <div className="day-record-lines">
+                <div className="day-record-lines-head">
+                  <strong>선택 날짜 예약</strong>
+                </div>
+                {selectedReservationItems.length === 0 ? (
+                  <p className="empty small-empty">선택한 날짜의 예약이 없습니다.</p>
+                ) : (
+                  selectedReservationItems.map((reservation) => (
+                    <div key={reservation.id}>
+                      <span>
+                        {reservation.customerName} · {reservation.lines.map((line) => `${line.name} ${line.quantity}개`).join(", ")}
+                      </span>
+                      <small>
+                        {paymentLabels[reservation.paymentMethod]} · {money(reservation.total)} · {reservation.customerAddress}
+                      </small>
+                      {reservation.completedAt ? (
+                        <b className="sale-status">완료</b>
+                      ) : (
+                        <button onClick={() => completeReservation(reservation.id)} type="button">
+                          계산 완료
+                        </button>
+                      )}
+                      <button onClick={() => deleteReservation(reservation.id)} type="button">
+                        삭제
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          </div>
+
+          <div className="manage-panel">
+            <div className="panel-head">
+              <div>
+                <p className="eyebrow">Address Book</p>
+                <h2>회원 주소록</h2>
+              </div>
+            </div>
+            <form className="form-grid address-form" onSubmit={addCustomer}>
+              <input placeholder="회원명" value={customerForm.name} onChange={(event) => setCustomerForm({ ...customerForm, name: event.target.value })} />
+              <input placeholder="연락처" value={customerForm.phone} onChange={(event) => setCustomerForm({ ...customerForm, phone: event.target.value })} />
+              <input placeholder="주소" value={customerForm.address} onChange={(event) => setCustomerForm({ ...customerForm, address: event.target.value })} />
+              <button className="primary-button" type="submit">
+                추가
+              </button>
+            </form>
+            <div className="category-list address-list">
+              {customers.length === 0 ? (
+                <p className="empty small-empty">등록된 회원이 없습니다.</p>
+              ) : (
+                customers.map((customer) => (
+                  <div key={customer.id}>
+                    <input aria-label={`${customer.name} 이름`} value={customer.name} onChange={(event) => updateCustomer(customer.id, "name", event.target.value)} />
+                    <input aria-label={`${customer.name} 연락처`} value={customer.phone} onChange={(event) => updateCustomer(customer.id, "phone", event.target.value)} />
+                    <input aria-label={`${customer.name} 주소`} value={customer.address} onChange={(event) => updateCustomer(customer.id, "address", event.target.value)} />
+                    <button onClick={() => deleteCustomer(customer.id)} type="button">
+                      삭제
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </section>
+      ) : null}
     </main>
   );
 }
