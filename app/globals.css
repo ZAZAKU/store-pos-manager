@@ -941,6 +941,18 @@ textarea {
   justify-content: space-between;
 }
 
+.button-pair {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.reservation-prompt {
+  margin-top: 12px;
+}
+
 .day-edit-lines {
   display: grid;
   gap: 8px;

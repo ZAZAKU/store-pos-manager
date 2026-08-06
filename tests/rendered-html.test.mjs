@@ -81,6 +81,8 @@ test("keeps starter preview code out of the finished app", async () => {
   assert.match(page, /recordPurchase/);
   assert.match(page, /saveReservation/);
   assert.match(page, /completeReservation/);
+  assert.match(page, /reservationEditorOpen/);
+  assert.match(page, /reservationCartOpen/);
   assert.match(page, /beginEditProduct/);
   assert.match(page, /DayRecord/);
   assert.match(page, /DayRecordLine/);

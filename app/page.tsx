@@ -471,6 +471,8 @@ export default function Home() {
   const [reservationPaymentMethod, setReservationPaymentMethod] = useState<PaymentMethod>("card");
   const [selectedReservationDate, setSelectedReservationDate] = useState(dateKey(new Date()));
   const [reservationMonth, setReservationMonth] = useState(monthKey(new Date()));
+  const [reservationEditorOpen, setReservationEditorOpen] = useState(false);
+  const [reservationCartOpen, setReservationCartOpen] = useState(true);
   const [customerForm, setCustomerForm] = useState({ name: "", phone: "", address: "" });
   const [reservationForm, setReservationForm] = useState({ customerId: "", memo: "" });
   const [editingProductId, setEditingProductId] = useState("");
@@ -1110,6 +1112,8 @@ export default function Home() {
     setSelectedReservationDate(date);
     setReservationMonth(date.slice(0, 7));
     setReservationCart([]);
+    setReservationEditorOpen(true);
+    setReservationCartOpen(true);
   }
 
   function changeReservationMonth(month: string) {
@@ -2062,7 +2066,11 @@ export default function Home() {
                   <h3>{selectedReservationDate} 예약 입력</h3>
                   <small>예약 {selectedReservationItems.length}건 · 합계 {money(selectedReservationItems.reduce((sum, item) => sum + item.total, 0))}</small>
                 </div>
+                <button className="collapse-button" onClick={() => setReservationEditorOpen((open) => !open)} type="button">
+                  {reservationEditorOpen ? "접기" : "펼치기"}
+                </button>
               </div>
+              {reservationEditorOpen ? (
               <div className="day-edit-workspace">
                 <section>
                   <label className="day-note-field">
@@ -2109,10 +2117,17 @@ export default function Home() {
                 <section className="day-edit-cart">
                   <div className="day-edit-cart-head">
                     <strong>예약 품목</strong>
-                    <button className="text-button" onClick={() => setReservationCart([])} type="button">
-                      비우기
-                    </button>
+                    <div className="button-pair">
+                      <button className="collapse-button" onClick={() => setReservationCartOpen((open) => !open)} type="button">
+                        {reservationCartOpen ? "접기" : "펼치기"}
+                      </button>
+                      <button className="text-button" onClick={() => setReservationCart([])} type="button">
+                        비우기
+                      </button>
+                    </div>
                   </div>
+                  {reservationCartOpen ? (
+                    <>
                   <div className="day-edit-lines">
                     {reservationCartLines.length === 0 ? (
                       <p className="empty small-empty">예약할 상품을 선택하세요.</p>
@@ -2166,8 +2181,13 @@ export default function Home() {
                   <button className="primary-button" onClick={saveReservation} type="button">
                     예약 저장
                   </button>
+                    </>
+                  ) : null}
                 </section>
               </div>
+              ) : (
+                <p className="empty small-empty reservation-prompt">달력에서 날짜를 누르면 카테고리와 예약 품목 선택창이 열립니다.</p>
+              )}
               <div className="day-record-lines">
                 <div className="day-record-lines-head">
                   <strong>선택 날짜 예약</strong>
