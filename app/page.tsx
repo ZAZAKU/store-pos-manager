@@ -106,12 +106,15 @@ type ProductSort = "createdDesc" | "createdAsc" | "nameAsc" | "nameDesc" | "pric
 type StoredData = {
   categories?: Category[];
   products?: Product[];
+  purchaseCategories?: Category[];
+  purchaseProducts?: Product[];
   sales?: Sale[];
   purchases?: Purchase[];
   dayRecords?: DayRecord[];
   customers?: Customer[];
   reservations?: Reservation[];
   activeCategory?: string;
+  purchaseActiveCategory?: string;
   productSort?: ProductSort;
   updatedAt?: string;
 };
@@ -384,18 +387,26 @@ function legacyDayRecordLines(record: DayRecord) {
 
 function normalizeStoredData(parsed: StoredData) {
   const categories = parsed.categories?.length ? parsed.categories.slice(0, MAX_CATEGORIES) : seedCategories;
+  const purchaseCategories = (parsed.purchaseCategories?.length ? parsed.purchaseCategories : categories).slice(0, MAX_CATEGORIES);
   const activeCategory =
     parsed.activeCategory === "all" || categories.some((category) => category.id === parsed.activeCategory) ? parsed.activeCategory : "all";
+  const purchaseActiveCategory =
+    parsed.purchaseActiveCategory === "all" || purchaseCategories.some((category) => category.id === parsed.purchaseActiveCategory)
+      ? parsed.purchaseActiveCategory
+      : "all";
 
   return {
     categories,
     products: parsed.products?.length ? parsed.products : seedProducts,
+    purchaseCategories,
+    purchaseProducts: parsed.purchaseProducts?.length ? parsed.purchaseProducts : parsed.products?.length ? parsed.products : seedProducts,
     sales: normalizeSales(parsed.sales ?? []),
     purchases: normalizePurchases(parsed.purchases ?? []),
     dayRecords: normalizeDayRecords(parsed.dayRecords ?? []),
     customers: normalizeCustomers(parsed.customers ?? []),
     reservations: normalizeReservations(parsed.reservations ?? []),
     activeCategory,
+    purchaseActiveCategory,
     productSort: parsed.productSort ?? "createdDesc",
     updatedAt: parsed.updatedAt ?? "",
   };
@@ -411,16 +422,22 @@ function makeStoredData(
   purchases: Purchase[] = [],
   customers: Customer[] = [],
   reservations: Reservation[] = [],
+  purchaseCategories: Category[] = categories,
+  purchaseProducts: Product[] = products,
+  purchaseActiveCategory = "all",
 ): Required<StoredData> {
   return {
     categories,
     products,
+    purchaseCategories,
+    purchaseProducts,
     sales,
     purchases,
     dayRecords,
     customers,
     reservations,
     activeCategory,
+    purchaseActiveCategory,
     productSort,
     updatedAt: new Date().toISOString(),
   };
@@ -449,10 +466,28 @@ function writeStoredData(
   purchases: Purchase[] = [],
   customers: Customer[] = [],
   reservations: Reservation[] = [],
+  purchaseCategories?: Category[],
+  purchaseProducts?: Product[],
+  purchaseActiveCategory?: string,
 ) {
   if (typeof window === "undefined") return null;
   try {
-    const data = makeStoredData(categories, products, sales, activeCategory, dayRecords, productSort, purchases, customers, reservations);
+    const stored = localStorage.getItem(STORAGE_KEY) ?? localStorage.getItem(STORAGE_BACKUP_KEY);
+    const previous = stored ? normalizeStoredData(JSON.parse(stored) as StoredData) : null;
+    const data = makeStoredData(
+      categories,
+      products,
+      sales,
+      activeCategory,
+      dayRecords,
+      productSort,
+      purchases,
+      customers,
+      reservations,
+      purchaseCategories ?? previous?.purchaseCategories ?? categories,
+      purchaseProducts ?? previous?.purchaseProducts ?? products,
+      purchaseActiveCategory ?? previous?.purchaseActiveCategory ?? "all",
+    );
     const payload = JSON.stringify(data);
     localStorage.setItem(STORAGE_KEY, payload);
     localStorage.setItem(STORAGE_BACKUP_KEY, payload);
@@ -558,6 +593,9 @@ export default function Home() {
   const [dayEditOpen, setDayEditOpen] = useState(true);
   const [dayRecordLinesOpen, setDayRecordLinesOpen] = useState(true);
   const [activeCategory, setActiveCategory] = useState("all");
+  const [purchaseCategories, setPurchaseCategories] = useState<Category[]>(seedCategories);
+  const [purchaseProducts, setPurchaseProducts] = useState<Product[]>(seedProducts);
+  const [activePurchaseCategory, setActivePurchaseCategory] = useState("all");
   const [productSort, setProductSort] = useState<ProductSort>("createdDesc");
   const [selectedMonth, setSelectedMonth] = useState(monthKey(new Date()));
   const [selectedCalendarDate, setSelectedCalendarDate] = useState(dateKey(new Date()));
@@ -569,6 +607,8 @@ export default function Home() {
   const [selectedRankDate, setSelectedRankDate] = useState(dateKey(new Date()));
   const [productForm, setProductForm] = useState({ name: "", price: "", categoryId: seedCategories[0].id });
   const [categoryForm, setCategoryForm] = useState("");
+  const [purchaseProductForm, setPurchaseProductForm] = useState({ name: "", price: "", categoryId: seedCategories[0].id });
+  const [purchaseCategoryForm, setPurchaseCategoryForm] = useState("");
   const [notice, setNotice] = useState("오늘 첫 판매를 기다리는 중입니다.");
   const [lastSavedAt, setLastSavedAt] = useState("");
   const [syncState, setSyncState] = useState<SyncState>("checking");
@@ -577,17 +617,24 @@ export default function Home() {
   function applyStoredData(data: ReturnType<typeof normalizeStoredData>) {
     setCategories(data.categories);
     setProducts(data.products);
+    setPurchaseCategories(data.purchaseCategories);
+    setPurchaseProducts(data.purchaseProducts);
     setSales(data.sales);
     setPurchases(data.purchases);
     setDayRecords(data.dayRecords);
     setCustomers(data.customers);
     setReservations(data.reservations);
     setActiveCategory(data.activeCategory);
+    setActivePurchaseCategory(data.purchaseActiveCategory);
     setProductSort(data.productSort);
     setLastSavedAt(data.updatedAt);
     setProductForm((current) => ({
       ...current,
       categoryId: data.categories[0]?.id ?? seedCategories[0].id,
+    }));
+    setPurchaseProductForm((current) => ({
+      ...current,
+      categoryId: data.purchaseCategories[0]?.id ?? seedCategories[0].id,
     }));
   }
 
@@ -633,7 +680,20 @@ export default function Home() {
 
   useEffect(() => {
     if (!ready) return;
-    const saved = writeStoredData(categories, products, sales, activeCategory, dayRecords, productSort, purchases, customers, reservations);
+    const saved = writeStoredData(
+      categories,
+      products,
+      sales,
+      activeCategory,
+      dayRecords,
+      productSort,
+      purchases,
+      customers,
+      reservations,
+      purchaseCategories,
+      purchaseProducts,
+      activePurchaseCategory,
+    );
     if (!saved) {
       setNotice("브라우저 저장소를 사용할 수 없습니다. 시크릿 모드나 저장소 차단 설정을 확인해 주세요.");
       return;
@@ -642,7 +702,7 @@ export default function Home() {
     writeCloudData(saved).then((uploaded) => {
       setSyncState(uploaded ? "cloud" : "local");
     });
-  }, [activeCategory, categories, customers, dayRecords, productSort, products, purchases, ready, reservations, sales]);
+  }, [activeCategory, activePurchaseCategory, categories, customers, dayRecords, productSort, products, purchaseCategories, purchaseProducts, purchases, ready, reservations, sales]);
 
   useEffect(() => {
     if (!ready) return;
@@ -675,7 +735,20 @@ export default function Home() {
   useEffect(() => {
     if (!ready) return;
     const persistBeforeClose = () => {
-      writeStoredData(categories, products, sales, activeCategory, dayRecords, productSort, purchases, customers, reservations);
+      writeStoredData(
+        categories,
+        products,
+        sales,
+        activeCategory,
+        dayRecords,
+        productSort,
+        purchases,
+        customers,
+        reservations,
+        purchaseCategories,
+        purchaseProducts,
+        activePurchaseCategory,
+      );
     };
     const persistWhenHidden = () => {
       if (document.visibilityState === "hidden") persistBeforeClose();
@@ -688,11 +761,12 @@ export default function Home() {
       window.removeEventListener("pagehide", persistBeforeClose);
       document.removeEventListener("visibilitychange", persistWhenHidden);
     };
-  }, [activeCategory, categories, customers, dayRecords, productSort, products, purchases, ready, reservations, sales]);
+  }, [activeCategory, activePurchaseCategory, categories, customers, dayRecords, productSort, products, purchaseCategories, purchaseProducts, purchases, ready, reservations, sales]);
 
   const activeSales = useMemo(() => sales.filter((sale) => !sale.cancelledAt), [sales]);
   const recentSales = sales.slice(0, 8);
   const categoryMap = useMemo(() => new Map(categories.map((category) => [category.id, category])), [categories]);
+  const purchaseCategoryMap = useMemo(() => new Map(purchaseCategories.map((category) => [category.id, category])), [purchaseCategories]);
   const dayRecordMap = useMemo(() => new Map(dayRecords.map((record) => [record.date, record])), [dayRecords]);
 
   const visibleProducts = useMemo(
@@ -704,14 +778,19 @@ export default function Home() {
     [dayEditCategory, productSort, products],
   );
   const visiblePurchaseDayEditProducts = useMemo(
-    () => sortProducts(products.filter((product) => purchaseDayEditCategory === "all" || product.categoryId === purchaseDayEditCategory), productSort),
-    [productSort, products, purchaseDayEditCategory],
+    () => sortProducts(purchaseProducts.filter((product) => purchaseDayEditCategory === "all" || product.categoryId === purchaseDayEditCategory), productSort),
+    [productSort, purchaseProducts, purchaseDayEditCategory],
+  );
+  const visiblePurchaseProducts = useMemo(
+    () => sortProducts(purchaseProducts.filter((product) => activePurchaseCategory === "all" || product.categoryId === activePurchaseCategory), productSort),
+    [activePurchaseCategory, productSort, purchaseProducts],
   );
   const visibleReservationProducts = useMemo(
     () => sortProducts(products.filter((product) => reservationCategory === "all" || product.categoryId === reservationCategory), productSort),
     [productSort, products, reservationCategory],
   );
   const sortedProducts = useMemo(() => sortProducts(products, productSort), [productSort, products]);
+  const sortedPurchaseProducts = useMemo(() => sortProducts(purchaseProducts, productSort), [productSort, purchaseProducts]);
 
   const cartLines = useMemo(
     () =>
@@ -736,9 +815,9 @@ export default function Home() {
     () =>
       purchaseCart
         .map((item) => {
-          const product = products.find((entry) => entry.id === item.productId);
+          const product = purchaseProducts.find((entry) => entry.id === item.productId);
           if (!product) return null;
-          const category = categoryMap.get(product.categoryId);
+          const category = purchaseCategoryMap.get(product.categoryId);
           return {
             ...item,
             product,
@@ -747,16 +826,16 @@ export default function Home() {
           };
         })
         .filter(Boolean),
-    [categoryMap, products, purchaseCart],
+    [purchaseCart, purchaseCategoryMap, purchaseProducts],
   );
   const purchaseCartTotal = purchaseCartLines.reduce((sum, item) => sum + (item?.total ?? 0), 0);
   const purchaseDayEditCartLines = useMemo(
     () =>
       purchaseDayEditCart
         .map((item) => {
-          const product = products.find((entry) => entry.id === item.productId);
+          const product = purchaseProducts.find((entry) => entry.id === item.productId);
           if (!product) return null;
-          const category = categoryMap.get(product.categoryId);
+          const category = purchaseCategoryMap.get(product.categoryId);
           return {
             ...item,
             product,
@@ -765,7 +844,7 @@ export default function Home() {
           };
         })
         .filter(Boolean),
-    [categoryMap, products, purchaseDayEditCart],
+    [purchaseCategoryMap, purchaseDayEditCart, purchaseProducts],
   );
   const purchaseDayEditCartTotal = purchaseDayEditCartLines.reduce((sum, item) => sum + (item?.total ?? 0), 0);
   const dayEditCartLines = useMemo(
@@ -1078,7 +1157,20 @@ export default function Home() {
     };
     const nextSales = [sale, ...sales];
     setSales(nextSales);
-    writeStoredData(categories, products, nextSales, activeCategory, dayRecords, productSort, purchases, customers, reservations);
+    writeStoredData(
+      categories,
+      products,
+      nextSales,
+      activeCategory,
+      dayRecords,
+      productSort,
+      purchases,
+      customers,
+      reservations,
+      purchaseCategories,
+      purchaseProducts,
+      activePurchaseCategory,
+    );
     setCart([]);
     setNotice(`${paymentLabels[paymentMethod]} ${money(sale.total)} 결제가 기록되었습니다. 잘못 눌렀다면 최근 계산 내역에서 취소하세요.`);
   }
@@ -1088,7 +1180,20 @@ export default function Home() {
     if (!sale || sale.cancelledAt) return;
     const nextSales = sales.map((entry) => (entry.id === saleId ? { ...entry, cancelledAt: new Date().toISOString() } : entry));
     setSales(nextSales);
-    writeStoredData(categories, products, nextSales, activeCategory, dayRecords, productSort, purchases, customers, reservations);
+    writeStoredData(
+      categories,
+      products,
+      nextSales,
+      activeCategory,
+      dayRecords,
+      productSort,
+      purchases,
+      customers,
+      reservations,
+      purchaseCategories,
+      purchaseProducts,
+      activePurchaseCategory,
+    );
     setNotice(`${timeFormatter.format(new Date(sale.soldAt))} 결제 ${money(sale.total)}를 취소했습니다.`);
   }
 
@@ -1117,7 +1222,20 @@ export default function Home() {
     setPurchases(nextPurchases);
     setPurchaseCart([]);
     setPurchaseMemo("");
-    writeStoredData(categories, products, sales, activeCategory, dayRecords, productSort, nextPurchases, customers, reservations);
+    writeStoredData(
+      categories,
+      products,
+      sales,
+      activeCategory,
+      dayRecords,
+      productSort,
+      nextPurchases,
+      customers,
+      reservations,
+      purchaseCategories,
+      purchaseProducts,
+      activePurchaseCategory,
+    );
     setNotice(`매입 ${money(purchase.total)}를 기록했습니다.`);
   }
 
@@ -1160,14 +1278,40 @@ export default function Home() {
     const nextPurchases = [purchase, ...purchases];
     setPurchases(nextPurchases);
     setPurchaseDayEditCart([]);
-    writeStoredData(categories, products, sales, activeCategory, dayRecords, productSort, nextPurchases, customers, reservations);
+    writeStoredData(
+      categories,
+      products,
+      sales,
+      activeCategory,
+      dayRecords,
+      productSort,
+      nextPurchases,
+      customers,
+      reservations,
+      purchaseCategories,
+      purchaseProducts,
+      activePurchaseCategory,
+    );
     setNotice(`${selectedPurchaseDate}에 ${paymentLabels[purchaseDayEditPaymentMethod]} 매입 ${money(purchase.total)}를 추가했습니다.`);
   }
 
   function updatePurchaseMemo(purchaseId: string, memo: string) {
     const nextPurchases = purchases.map((purchase) => (purchase.id === purchaseId ? { ...purchase, memo } : purchase));
     setPurchases(nextPurchases);
-    writeStoredData(categories, products, sales, activeCategory, dayRecords, productSort, nextPurchases, customers, reservations);
+    writeStoredData(
+      categories,
+      products,
+      sales,
+      activeCategory,
+      dayRecords,
+      productSort,
+      nextPurchases,
+      customers,
+      reservations,
+      purchaseCategories,
+      purchaseProducts,
+      activePurchaseCategory,
+    );
   }
 
   function removePurchaseLine(purchaseId: string, productId: string) {
@@ -1179,7 +1323,20 @@ export default function Home() {
       })
       .filter((purchase) => purchase.lines.length > 0);
     setPurchases(nextPurchases);
-    writeStoredData(categories, products, sales, activeCategory, dayRecords, productSort, nextPurchases, customers, reservations);
+    writeStoredData(
+      categories,
+      products,
+      sales,
+      activeCategory,
+      dayRecords,
+      productSort,
+      nextPurchases,
+      customers,
+      reservations,
+      purchaseCategories,
+      purchaseProducts,
+      activePurchaseCategory,
+    );
     setNotice(`${selectedPurchaseDate} 매입 내역을 수정했습니다.`);
   }
 
@@ -1188,21 +1345,69 @@ export default function Home() {
     if (!purchase || purchase.cancelledAt) return;
     const nextPurchases = purchases.map((entry) => (entry.id === purchaseId ? { ...entry, cancelledAt: new Date().toISOString() } : entry));
     setPurchases(nextPurchases);
-    writeStoredData(categories, products, sales, activeCategory, dayRecords, productSort, nextPurchases, customers, reservations);
+    writeStoredData(
+      categories,
+      products,
+      sales,
+      activeCategory,
+      dayRecords,
+      productSort,
+      nextPurchases,
+      customers,
+      reservations,
+      purchaseCategories,
+      purchaseProducts,
+      activePurchaseCategory,
+    );
     setNotice(`매입 ${money(purchase.total)}를 취소했습니다.`);
   }
 
   function addProduct(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const name = productForm.name.trim();
-    const price = Number(productForm.price);
+    const form = activeView === "purchase" ? purchaseProductForm : productForm;
+    const name = form.name.trim();
+    const price = Number(form.price);
     if (!name || !Number.isFinite(price) || price <= 0) {
       setNotice("상품명과 0원보다 큰 가격을 입력해 주세요.");
       return;
     }
+    if (activeView === "purchase") {
+      const nextProducts = [{ id: makeId("purchase-prod"), name, price: Math.round(price), categoryId: purchaseProductForm.categoryId }, ...purchaseProducts];
+      setPurchaseProducts(nextProducts);
+      writeStoredData(
+        categories,
+        products,
+        sales,
+        activeCategory,
+        dayRecords,
+        productSort,
+        purchases,
+        customers,
+        reservations,
+        purchaseCategories,
+        nextProducts,
+        activePurchaseCategory,
+      );
+      setPurchaseProductForm({ name: "", price: "", categoryId: purchaseProductForm.categoryId });
+      setNotice(`${name} 매입 상품을 등록했습니다.`);
+      return;
+    }
     const nextProducts = [{ id: makeId("prod"), name, price: Math.round(price), categoryId: productForm.categoryId }, ...products];
     setProducts(nextProducts);
-    writeStoredData(categories, nextProducts, sales, activeCategory, dayRecords, productSort, purchases, customers, reservations);
+    writeStoredData(
+      categories,
+      nextProducts,
+      sales,
+      activeCategory,
+      dayRecords,
+      productSort,
+      purchases,
+      customers,
+      reservations,
+      purchaseCategories,
+      purchaseProducts,
+      activePurchaseCategory,
+    );
     setProductForm({ name: "", price: "", categoryId: productForm.categoryId });
     setNotice(`${name} 상품을 등록했습니다.`);
   }
@@ -1219,17 +1424,86 @@ export default function Home() {
       setNotice("수정할 상품명과 0원보다 큰 가격을 입력해 주세요.");
       return;
     }
+    if (activeView === "purchase") {
+      const nextProducts = purchaseProducts.map((product) =>
+        product.id === productId ? { ...product, name, price: Math.round(price), categoryId: productEditForm.categoryId } : product,
+      );
+      setPurchaseProducts(nextProducts);
+      setEditingProductId("");
+      writeStoredData(
+        categories,
+        products,
+        sales,
+        activeCategory,
+        dayRecords,
+        productSort,
+        purchases,
+        customers,
+        reservations,
+        purchaseCategories,
+        nextProducts,
+        activePurchaseCategory,
+      );
+      setNotice(`${name} 매입 상품을 수정했습니다.`);
+      return;
+    }
     const nextProducts = products.map((product) =>
       product.id === productId ? { ...product, name, price: Math.round(price), categoryId: productEditForm.categoryId } : product,
     );
     setProducts(nextProducts);
     setEditingProductId("");
-    writeStoredData(categories, nextProducts, sales, activeCategory, dayRecords, productSort, purchases, customers, reservations);
+    writeStoredData(
+      categories,
+      nextProducts,
+      sales,
+      activeCategory,
+      dayRecords,
+      productSort,
+      purchases,
+      customers,
+      reservations,
+      purchaseCategories,
+      purchaseProducts,
+      activePurchaseCategory,
+    );
     setNotice(`${name} 상품을 수정했습니다.`);
   }
 
   function addCategory(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (activeView === "purchase") {
+      if (purchaseCategories.length >= MAX_CATEGORIES) {
+        setNotice(`매입 카테고리는 최대 ${MAX_CATEGORIES}개까지 추가할 수 있습니다.`);
+        return;
+      }
+      const name = purchaseCategoryForm.trim();
+      if (!name) {
+        setNotice("매입 카테고리 이름을 입력해 주세요.");
+        return;
+      }
+      const category = { id: makeId("purchase-cat"), name, color: colors[purchaseCategories.length % colors.length] };
+      const nextCategories = [...purchaseCategories, category];
+      setPurchaseCategories(nextCategories);
+      setActivePurchaseCategory(category.id);
+      setPurchaseProductForm((current) => ({ ...current, categoryId: category.id }));
+      setPurchaseCategoryForm("");
+      writeStoredData(
+        categories,
+        products,
+        sales,
+        activeCategory,
+        dayRecords,
+        productSort,
+        purchases,
+        customers,
+        reservations,
+        nextCategories,
+        purchaseProducts,
+        category.id,
+      );
+      setNotice(`${name} 매입 카테고리를 추가했습니다. 현재 ${purchaseCategories.length + 1}/${MAX_CATEGORIES}개입니다.`);
+      return;
+    }
     if (categories.length >= MAX_CATEGORIES) {
       setNotice(`카테고리는 최대 ${MAX_CATEGORIES}개까지 추가할 수 있습니다.`);
       return;
@@ -1245,22 +1519,95 @@ export default function Home() {
     setActiveCategory(category.id);
     setProductForm((current) => ({ ...current, categoryId: category.id }));
     setCategoryForm("");
-    writeStoredData(nextCategories, products, sales, category.id, dayRecords, productSort, purchases, customers, reservations);
+    writeStoredData(
+      nextCategories,
+      products,
+      sales,
+      category.id,
+      dayRecords,
+      productSort,
+      purchases,
+      customers,
+      reservations,
+      purchaseCategories,
+      purchaseProducts,
+      activePurchaseCategory,
+    );
     setNotice(`${name} 카테고리를 추가했습니다. 현재 ${categories.length + 1}/${MAX_CATEGORIES}개입니다.`);
   }
 
   function deleteProduct(productId: string) {
+    if (activeView === "purchase") {
+      const nextProducts = purchaseProducts.filter((item) => item.id !== productId);
+      setPurchaseProducts(nextProducts);
+      writeStoredData(
+        categories,
+        products,
+        sales,
+        activeCategory,
+        dayRecords,
+        productSort,
+        purchases,
+        customers,
+        reservations,
+        purchaseCategories,
+        nextProducts,
+        activePurchaseCategory,
+      );
+      setPurchaseCart((items) => items.filter((item) => item.productId !== productId));
+      setPurchaseDayEditCart((items) => items.filter((item) => item.productId !== productId));
+      return;
+    }
     const nextProducts = products.filter((item) => item.id !== productId);
     setProducts(nextProducts);
-    writeStoredData(categories, nextProducts, sales, activeCategory, dayRecords, productSort, purchases, customers, reservations);
+    writeStoredData(
+      categories,
+      nextProducts,
+      sales,
+      activeCategory,
+      dayRecords,
+      productSort,
+      purchases,
+      customers,
+      reservations,
+      purchaseCategories,
+      purchaseProducts,
+      activePurchaseCategory,
+    );
     setCart((items) => items.filter((item) => item.productId !== productId));
     setDayEditCart((items) => items.filter((item) => item.productId !== productId));
-    setPurchaseCart((items) => items.filter((item) => item.productId !== productId));
-    setPurchaseDayEditCart((items) => items.filter((item) => item.productId !== productId));
     setReservationCart((items) => items.filter((item) => item.productId !== productId));
   }
 
   function deleteCategory(categoryId: string) {
+    if (activeView === "purchase") {
+      if (purchaseCategories.length === 1) {
+        setNotice("매입 카테고리는 최소 1개가 필요합니다.");
+        return;
+      }
+      const nextCategory = purchaseCategories.find((category) => category.id !== categoryId);
+      const nextProducts = purchaseProducts.map((item) => (item.categoryId === categoryId ? { ...item, categoryId: nextCategory!.id } : item));
+      const nextCategories = purchaseCategories.filter((item) => item.id !== categoryId);
+      setPurchaseProducts(nextProducts);
+      setPurchaseCategories(nextCategories);
+      setActivePurchaseCategory("all");
+      setPurchaseProductForm((current) => ({ ...current, categoryId: nextCategory!.id }));
+      writeStoredData(
+        categories,
+        products,
+        sales,
+        activeCategory,
+        dayRecords,
+        productSort,
+        purchases,
+        customers,
+        reservations,
+        nextCategories,
+        nextProducts,
+        "all",
+      );
+      return;
+    }
     if (categories.length === 1) {
       setNotice("카테고리는 최소 1개가 필요합니다.");
       return;
@@ -1271,23 +1618,113 @@ export default function Home() {
     setProducts(nextProducts);
     setCategories(nextCategories);
     setActiveCategory("all");
-    writeStoredData(nextCategories, nextProducts, sales, "all", dayRecords, productSort, purchases, customers, reservations);
+    setProductForm((current) => ({ ...current, categoryId: nextCategory!.id }));
+    writeStoredData(
+      nextCategories,
+      nextProducts,
+      sales,
+      "all",
+      dayRecords,
+      productSort,
+      purchases,
+      customers,
+      reservations,
+      purchaseCategories,
+      purchaseProducts,
+      activePurchaseCategory,
+    );
   }
 
   function renameCategory(categoryId: string, name: string) {
+    if (activeView === "purchase") {
+      const nextCategories = purchaseCategories.map((item) => (item.id === categoryId ? { ...item, name } : item));
+      setPurchaseCategories(nextCategories);
+      writeStoredData(
+        categories,
+        products,
+        sales,
+        activeCategory,
+        dayRecords,
+        productSort,
+        purchases,
+        customers,
+        reservations,
+        nextCategories,
+        purchaseProducts,
+        activePurchaseCategory,
+      );
+      return;
+    }
     const nextCategories = categories.map((item) => (item.id === categoryId ? { ...item, name } : item));
     setCategories(nextCategories);
-    writeStoredData(nextCategories, products, sales, activeCategory, dayRecords, productSort, purchases, customers, reservations);
+    writeStoredData(
+      nextCategories,
+      products,
+      sales,
+      activeCategory,
+      dayRecords,
+      productSort,
+      purchases,
+      customers,
+      reservations,
+      purchaseCategories,
+      purchaseProducts,
+      activePurchaseCategory,
+    );
   }
 
   function selectCategory(categoryId: string) {
+    if (activeView === "purchase") {
+      setActivePurchaseCategory(categoryId);
+      writeStoredData(
+        categories,
+        products,
+        sales,
+        activeCategory,
+        dayRecords,
+        productSort,
+        purchases,
+        customers,
+        reservations,
+        purchaseCategories,
+        purchaseProducts,
+        categoryId,
+      );
+      return;
+    }
     setActiveCategory(categoryId);
-    writeStoredData(categories, products, sales, categoryId, dayRecords, productSort, purchases, customers, reservations);
+    writeStoredData(
+      categories,
+      products,
+      sales,
+      categoryId,
+      dayRecords,
+      productSort,
+      purchases,
+      customers,
+      reservations,
+      purchaseCategories,
+      purchaseProducts,
+      activePurchaseCategory,
+    );
   }
 
   function changeProductSort(sort: ProductSort) {
     setProductSort(sort);
-    writeStoredData(categories, products, sales, activeCategory, dayRecords, sort, purchases, customers, reservations);
+    writeStoredData(
+      categories,
+      products,
+      sales,
+      activeCategory,
+      dayRecords,
+      sort,
+      purchases,
+      customers,
+      reservations,
+      purchaseCategories,
+      purchaseProducts,
+      activePurchaseCategory,
+    );
   }
 
   function selectCalendarDate(date: string) {
@@ -1309,7 +1746,20 @@ export default function Home() {
       ? [...dayRecords.filter((record) => record.date !== date), nextRecord].sort((a, b) => a.date.localeCompare(b.date))
       : dayRecords.filter((record) => record.date !== date);
     setDayRecords(nextRecords);
-    writeStoredData(categories, products, sales, activeCategory, nextRecords, productSort, purchases, customers, reservations);
+    writeStoredData(
+      categories,
+      products,
+      sales,
+      activeCategory,
+      nextRecords,
+      productSort,
+      purchases,
+      customers,
+      reservations,
+      purchaseCategories,
+      purchaseProducts,
+      activePurchaseCategory,
+    );
   }
 
   function updateDayRecordNote(date: string, note: string) {
@@ -1462,14 +1912,40 @@ export default function Home() {
       customerAddressDetail: customer.addressDetail ?? "",
     }));
     setCustomerForm({ name: "", phone: "", address: "", addressDetail: "", birthday: "", memo: "" });
-    writeStoredData(categories, products, sales, activeCategory, dayRecords, productSort, purchases, nextCustomers, reservations);
+    writeStoredData(
+      categories,
+      products,
+      sales,
+      activeCategory,
+      dayRecords,
+      productSort,
+      purchases,
+      nextCustomers,
+      reservations,
+      purchaseCategories,
+      purchaseProducts,
+      activePurchaseCategory,
+    );
     setNotice(`${name} 회원을 주소록에 추가했습니다.`);
   }
 
   function updateCustomer(customerId: string, field: keyof Omit<Customer, "id">, value: string) {
     const nextCustomers = customers.map((customer) => (customer.id === customerId ? { ...customer, [field]: value } : customer));
     setCustomers(nextCustomers);
-    writeStoredData(categories, products, sales, activeCategory, dayRecords, productSort, purchases, nextCustomers, reservations);
+    writeStoredData(
+      categories,
+      products,
+      sales,
+      activeCategory,
+      dayRecords,
+      productSort,
+      purchases,
+      nextCustomers,
+      reservations,
+      purchaseCategories,
+      purchaseProducts,
+      activePurchaseCategory,
+    );
   }
 
   function deleteCustomer(customerId: string) {
@@ -1480,7 +1956,20 @@ export default function Home() {
     const nextCustomers = customers.filter((customer) => customer.id !== customerId);
     setCustomers(nextCustomers);
     if (reservationForm.customerId === customerId) setReservationForm((current) => ({ ...current, customerId: "" }));
-    writeStoredData(categories, products, sales, activeCategory, dayRecords, productSort, purchases, nextCustomers, reservations);
+    writeStoredData(
+      categories,
+      products,
+      sales,
+      activeCategory,
+      dayRecords,
+      productSort,
+      purchases,
+      nextCustomers,
+      reservations,
+      purchaseCategories,
+      purchaseProducts,
+      activePurchaseCategory,
+    );
   }
 
   function saveReservation() {
@@ -1550,7 +2039,20 @@ export default function Home() {
       : [reservation, ...reservations];
     setReservations(nextReservations);
     resetReservationForm(selectedReservationDate);
-    writeStoredData(categories, products, sales, activeCategory, dayRecords, productSort, purchases, nextCustomers, nextReservations);
+    writeStoredData(
+      categories,
+      products,
+      sales,
+      activeCategory,
+      dayRecords,
+      productSort,
+      purchases,
+      nextCustomers,
+      nextReservations,
+      purchaseCategories,
+      purchaseProducts,
+      activePurchaseCategory,
+    );
     setNotice(`${selectedReservationDate} 예약을 ${editingReservationId ? "수정" : "저장"}했습니다.`);
   }
 
@@ -1558,7 +2060,20 @@ export default function Home() {
     if (!window.confirm("선택한 예약을 삭제하시겠습니까? 삭제한 데이터는 복구할 수 없습니다.")) return;
     const nextReservations = reservations.filter((reservation) => reservation.id !== reservationId);
     setReservations(nextReservations);
-    writeStoredData(categories, products, sales, activeCategory, dayRecords, productSort, purchases, customers, nextReservations);
+    writeStoredData(
+      categories,
+      products,
+      sales,
+      activeCategory,
+      dayRecords,
+      productSort,
+      purchases,
+      customers,
+      nextReservations,
+      purchaseCategories,
+      purchaseProducts,
+      activePurchaseCategory,
+    );
     setNotice("예약을 삭제했습니다.");
   }
 
@@ -1576,7 +2091,20 @@ export default function Home() {
     const nextReservations = reservations.map((entry) => (entry.id === reservationId ? { ...entry, status: "done" as ReservationStatus, completedAt: sale.soldAt } : entry));
     setSales(nextSales);
     setReservations(nextReservations);
-    writeStoredData(categories, products, nextSales, activeCategory, dayRecords, productSort, purchases, customers, nextReservations);
+    writeStoredData(
+      categories,
+      products,
+      nextSales,
+      activeCategory,
+      dayRecords,
+      productSort,
+      purchases,
+      customers,
+      nextReservations,
+      purchaseCategories,
+      purchaseProducts,
+      activePurchaseCategory,
+    );
     setNotice(`${reservation.customerName} 예약을 계산 완료하고 매출에 반영했습니다.`);
   }
 
@@ -2320,12 +2848,12 @@ export default function Home() {
               <span className="notice">{notice}</span>
             </div>
             <div className="category-tabs" aria-label="매입 카테고리 필터">
-              <button className={activeCategory === "all" ? "active" : ""} onClick={() => selectCategory("all")} type="button">
+              <button className={activePurchaseCategory === "all" ? "active" : ""} onClick={() => selectCategory("all")} type="button">
                 전체
               </button>
-              {categories.map((category) => (
+              {purchaseCategories.map((category) => (
                 <button
-                  className={activeCategory === category.id ? "active" : ""}
+                  className={activePurchaseCategory === category.id ? "active" : ""}
                   key={category.id}
                   onClick={() => selectCategory(category.id)}
                   style={{ "--accent": category.color } as React.CSSProperties}
@@ -2336,8 +2864,8 @@ export default function Home() {
               ))}
             </div>
             <div className="product-grid">
-              {visibleProducts.map((product) => {
-                const category = categoryMap.get(product.categoryId);
+              {visiblePurchaseProducts.map((product) => {
+                const category = purchaseCategoryMap.get(product.categoryId);
                 return (
                   <button className="product-tile purchase-tile" key={product.id} onClick={() => addToPurchaseCart(product.id)} type="button">
                     <span className="swatch" style={{ background: category?.color }} />
@@ -2453,16 +2981,16 @@ export default function Home() {
               </div>
             </div>
             <form className="form-grid" onSubmit={addProduct}>
-              <input placeholder="상품명" value={productForm.name} onChange={(event) => setProductForm({ ...productForm, name: event.target.value })} />
+              <input placeholder="상품명" value={purchaseProductForm.name} onChange={(event) => setPurchaseProductForm({ ...purchaseProductForm, name: event.target.value })} />
               <input
                 inputMode="numeric"
                 placeholder="금액"
                 type="number"
-                value={productForm.price}
-                onChange={(event) => setProductForm({ ...productForm, price: event.target.value })}
+                value={purchaseProductForm.price}
+                onChange={(event) => setPurchaseProductForm({ ...purchaseProductForm, price: event.target.value })}
               />
-              <select value={productForm.categoryId} onChange={(event) => setProductForm({ ...productForm, categoryId: event.target.value })}>
-                {categories.map((category) => (
+              <select value={purchaseProductForm.categoryId} onChange={(event) => setPurchaseProductForm({ ...purchaseProductForm, categoryId: event.target.value })}>
+                {purchaseCategories.map((category) => (
                   <option key={category.id} value={category.id}>
                     {category.name}
                   </option>
@@ -2473,7 +3001,7 @@ export default function Home() {
               </button>
             </form>
             <div className="compact-list">
-              {sortedProducts.map((product) => (
+              {sortedPurchaseProducts.map((product) => (
                 <div key={`purchase-${product.id}`}>
                   {editingProductId === product.id ? (
                     <div className="edit-product-row">
@@ -2494,7 +3022,7 @@ export default function Home() {
                         value={productEditForm.categoryId}
                         onChange={(event) => setProductEditForm({ ...productEditForm, categoryId: event.target.value })}
                       >
-                        {categories.map((category) => (
+                        {purchaseCategories.map((category) => (
                           <option key={category.id} value={category.id}>
                             {category.name}
                           </option>
@@ -2529,21 +3057,21 @@ export default function Home() {
                 <p className="eyebrow">Categories</p>
                 <h2>매입 카테고리 설정</h2>
               </div>
-              <span className="limit-badge">{categories.length}/{MAX_CATEGORIES}</span>
+              <span className="limit-badge">{purchaseCategories.length}/{MAX_CATEGORIES}</span>
             </div>
             <form className="inline-form" onSubmit={addCategory}>
               <input
-                disabled={categories.length >= MAX_CATEGORIES}
-                placeholder={categories.length >= MAX_CATEGORIES ? "카테고리 최대 개수 도달" : "새 카테고리"}
-                value={categoryForm}
-                onChange={(event) => setCategoryForm(event.target.value)}
+                disabled={purchaseCategories.length >= MAX_CATEGORIES}
+                placeholder={purchaseCategories.length >= MAX_CATEGORIES ? "카테고리 최대 개수 도달" : "새 카테고리"}
+                value={purchaseCategoryForm}
+                onChange={(event) => setPurchaseCategoryForm(event.target.value)}
               />
-              <button className="primary-button" disabled={categories.length >= MAX_CATEGORIES} type="submit">
+              <button className="primary-button" disabled={purchaseCategories.length >= MAX_CATEGORIES} type="submit">
                 추가
               </button>
             </form>
             <div className="category-list">
-              {categories.map((category) => (
+              {purchaseCategories.map((category) => (
                 <div key={`purchase-${category.id}`}>
                   <span className="swatch" style={{ background: category.color }} />
                   <input aria-label={`${category.name} 매입 카테고리 이름`} value={category.name} onChange={(event) => renameCategory(category.id, event.target.value)} />
@@ -2617,7 +3145,7 @@ export default function Home() {
                       <button className={purchaseDayEditCategory === "all" ? "active" : ""} onClick={() => setPurchaseDayEditCategory("all")} type="button">
                         전체
                       </button>
-                      {categories.map((category) => (
+                      {purchaseCategories.map((category) => (
                         <button
                           className={purchaseDayEditCategory === category.id ? "active" : ""}
                           key={`purchase-day-${category.id}`}
@@ -2631,7 +3159,7 @@ export default function Home() {
                     </div>
                     <div className="day-product-grid">
                       {visiblePurchaseDayEditProducts.map((product) => {
-                        const category = categoryMap.get(product.categoryId);
+                        const category = purchaseCategoryMap.get(product.categoryId);
                         return (
                           <button className="day-product-tile" key={`purchase-day-${product.id}`} onClick={() => addToPurchaseDayEditCart(product.id)} type="button">
                             <span className="swatch" style={{ background: category?.color }} />
