@@ -687,11 +687,11 @@ textarea {
 }
 
 .address-form {
-  grid-template-columns: minmax(110px, 1fr) minmax(120px, 1fr) minmax(180px, 2fr) 88px;
+  grid-template-columns: minmax(110px, 1fr) minmax(120px, 1fr) minmax(180px, 2fr) 120px minmax(140px, 1fr) 96px;
 }
 
 .address-list > div {
-  grid-template-columns: minmax(100px, 1fr) minmax(110px, 1fr) minmax(160px, 2fr) auto;
+  grid-template-columns: minmax(90px, 1fr) minmax(110px, 1fr) minmax(160px, 2fr) minmax(90px, 1fr) minmax(130px, 1fr) auto;
 }
 
 .reservation-page {
@@ -708,6 +708,10 @@ textarea {
 
 .purchase-tile {
   border-color: #bfd8c7;
+}
+
+.purchase-total {
+  background: #f0fdf4;
 }
 
 .rank-list b {
@@ -790,6 +794,24 @@ textarea {
 .calendar-day small {
   margin-top: auto;
   color: var(--muted);
+}
+
+.calendar-day em.reservation-line-mark,
+.calendar-day em.reservation-done {
+  display: block;
+  overflow: hidden;
+  margin-top: 4px;
+  color: var(--foreground);
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.calendar-day em.reservation-done {
+  color: var(--muted);
+  text-decoration: line-through;
 }
 
 .calendar-day.blank {
@@ -1001,6 +1023,11 @@ textarea {
   color: var(--muted);
   font-size: 12px;
   font-weight: 800;
+}
+
+.day-record-lines input {
+  min-height: 34px;
+  min-width: 140px;
 }
 
 .day-record-lines button {
