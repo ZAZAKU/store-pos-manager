@@ -21,6 +21,8 @@ type CartItem = {
 };
 
 type PaymentMethod = "card" | "cash" | "transfer";
+type ReservationStatus = "reserved" | "confirmed" | "preparing" | "delivering" | "done" | "cancelled";
+type ReservationPaymentStatus = "paid" | "partial" | "unpaid" | "refunded";
 
 type SaleLine = {
   productId: string;
@@ -69,6 +71,7 @@ type Customer = {
   name: string;
   phone: string;
   address: string;
+  addressDetail?: string;
   birthday?: string;
   memo?: string;
 };
@@ -80,8 +83,12 @@ type Reservation = {
   customerName: string;
   customerPhone: string;
   customerAddress: string;
+  customerAddressDetail?: string;
+  deliveryTime?: string;
   memo: string;
   paymentMethod: PaymentMethod;
+  paymentStatus?: ReservationPaymentStatus;
+  status?: ReservationStatus;
   lines: DayRecordLine[];
   total: number;
   completedAt?: string;
@@ -142,6 +149,22 @@ const paymentLabels: Record<PaymentMethod, string> = {
   card: "카드",
   cash: "현금",
   transfer: "계좌이체",
+};
+
+const reservationStatusLabels: Record<ReservationStatus, string> = {
+  reserved: "예약",
+  confirmed: "예약확정",
+  preparing: "배송준비",
+  delivering: "배송중",
+  done: "배송완료",
+  cancelled: "취소",
+};
+
+const reservationPaymentStatusLabels: Record<ReservationPaymentStatus, string> = {
+  paid: "결제완료",
+  partial: "일부결제",
+  unpaid: "미결제",
+  refunded: "환불",
 };
 
 const productSortLabels: Record<ProductSort, string> = {
@@ -264,6 +287,7 @@ function normalizeCustomers(customers: Customer[] = []) {
     name: customer.name ?? "",
     phone: customer.phone ?? "",
     address: customer.address ?? "",
+    addressDetail: customer.addressDetail ?? "",
     birthday: customer.birthday ?? "",
     memo: customer.memo ?? "",
   }));
@@ -272,8 +296,12 @@ function normalizeCustomers(customers: Customer[] = []) {
 function normalizeReservations(reservations: Reservation[] = []) {
   return reservations.map((reservation) => ({
     ...reservation,
+    customerAddressDetail: reservation.customerAddressDetail ?? "",
+    deliveryTime: reservation.deliveryTime ?? "",
     memo: reservation.memo ?? "",
     paymentMethod: reservation.paymentMethod ?? "card",
+    paymentStatus: reservation.paymentStatus ?? "paid",
+    status: reservation.status ?? (reservation.completedAt ? "done" : "reserved"),
     lines: (reservation.lines ?? []).map((line) => ({
       ...line,
       id: line.id ?? makeId("reservation-line"),
@@ -511,8 +539,20 @@ export default function Home() {
   const [reservationMonth, setReservationMonth] = useState(monthKey(new Date()));
   const [reservationEditorOpen, setReservationEditorOpen] = useState(false);
   const [reservationCartOpen, setReservationCartOpen] = useState(true);
-  const [customerForm, setCustomerForm] = useState({ name: "", phone: "", address: "", birthday: "", memo: "" });
-  const [reservationForm, setReservationForm] = useState({ customerId: "", memo: "" });
+  const [customerForm, setCustomerForm] = useState({ name: "", phone: "", address: "", addressDetail: "", birthday: "", memo: "" });
+  const [reservationForm, setReservationForm] = useState({
+    customerId: "",
+    customerName: "",
+    customerPhone: "",
+    customerAddress: "",
+    customerAddressDetail: "",
+    deliveryTime: "",
+    paymentStatus: "paid" as ReservationPaymentStatus,
+    status: "reserved" as ReservationStatus,
+    memo: "",
+  });
+  const [editingReservationId, setEditingReservationId] = useState("");
+  const [customerSearch, setCustomerSearch] = useState("");
   const [editingProductId, setEditingProductId] = useState("");
   const [productEditForm, setProductEditForm] = useState({ name: "", price: "", categoryId: seedCategories[0].id });
   const [dayEditOpen, setDayEditOpen] = useState(true);
@@ -818,6 +858,23 @@ export default function Home() {
   const selectedReservationItems = reservations.filter((reservation) => reservation.date === selectedReservationDate);
   const selectedReservationMonthItems = reservations.filter((reservation) => reservation.date.startsWith(reservationMonth));
   const selectedReservationMonthTotal = selectedReservationMonthItems.reduce((sum, reservation) => sum + reservation.total, 0);
+  const selectedReservationMonthCardTotal = selectedReservationMonthItems
+    .filter((reservation) => reservation.paymentMethod === "card" && reservation.paymentStatus !== "unpaid")
+    .reduce((sum, reservation) => sum + reservation.total, 0);
+  const selectedReservationMonthCashTotal = selectedReservationMonthItems
+    .filter((reservation) => reservation.paymentMethod === "cash" && reservation.paymentStatus !== "unpaid")
+    .reduce((sum, reservation) => sum + reservation.total, 0);
+  const selectedReservationMonthTransferTotal = selectedReservationMonthItems
+    .filter((reservation) => reservation.paymentMethod === "transfer" && reservation.paymentStatus !== "unpaid")
+    .reduce((sum, reservation) => sum + reservation.total, 0);
+  const selectedReservationMonthUnpaidTotal = selectedReservationMonthItems
+    .filter((reservation) => reservation.paymentStatus === "unpaid")
+    .reduce((sum, reservation) => sum + reservation.total, 0);
+  const filteredCustomers = customers.filter((customer) => {
+    const keyword = customerSearch.trim().toLowerCase();
+    if (!keyword) return true;
+    return [customer.name, customer.phone, customer.address, customer.addressDetail ?? "", customer.memo ?? ""].some((value) => value.toLowerCase().includes(keyword));
+  });
   const reservationWeekDate = new Date(`${selectedReservationDate}T00:00:00`);
   const reservationWeekStart = startOfWeek(reservationWeekDate);
   const reservationWeekEnd = endOfWeek(reservationWeekDate);
@@ -1310,9 +1367,7 @@ export default function Home() {
   function selectReservationDate(date: string) {
     setSelectedReservationDate(date);
     setReservationMonth(date.slice(0, 7));
-    setReservationCart([]);
-    setReservationEditorOpen(true);
-    setReservationCartOpen(true);
+    resetReservationForm(date);
   }
 
   function changeReservationMonth(month: string) {
@@ -1320,6 +1375,64 @@ export default function Home() {
     if (!selectedReservationDate.startsWith(month)) {
       setSelectedReservationDate(`${month}-01`);
     }
+  }
+
+  function resetReservationForm(date = selectedReservationDate) {
+    setSelectedReservationDate(date);
+    setReservationCart([]);
+    setReservationPaymentMethod("card");
+    setEditingReservationId("");
+    setReservationForm({
+      customerId: "",
+      customerName: "",
+      customerPhone: "",
+      customerAddress: "",
+      customerAddressDetail: "",
+      deliveryTime: "",
+      paymentStatus: "paid",
+      status: "reserved",
+      memo: "",
+    });
+    setReservationEditorOpen(true);
+    setReservationCartOpen(true);
+  }
+
+  function applyCustomerToReservation(customerId: string) {
+    const customer = customers.find((entry) => entry.id === customerId);
+    setReservationForm((current) => ({
+      ...current,
+      customerId,
+      customerName: customer?.name ?? current.customerName,
+      customerPhone: customer?.phone ?? current.customerPhone,
+      customerAddress: customer?.address ?? current.customerAddress,
+      customerAddressDetail: customer?.addressDetail ?? current.customerAddressDetail,
+    }));
+  }
+
+  function editReservation(reservation: Reservation) {
+    setSelectedReservationDate(reservation.date);
+    setReservationMonth(reservation.date.slice(0, 7));
+    setEditingReservationId(reservation.id);
+    setReservationPaymentMethod(reservation.paymentMethod ?? "card");
+    setReservationCart(
+      reservation.lines.map((line) => ({
+        productId: line.productId,
+        quantity: line.quantity,
+      })),
+    );
+    setReservationForm({
+      customerId: reservation.customerId,
+      customerName: reservation.customerName,
+      customerPhone: reservation.customerPhone,
+      customerAddress: reservation.customerAddress,
+      customerAddressDetail: reservation.customerAddressDetail ?? "",
+      deliveryTime: reservation.deliveryTime ?? "",
+      paymentStatus: reservation.paymentStatus ?? "paid",
+      status: reservation.status ?? (reservation.completedAt ? "done" : "reserved"),
+      memo: reservation.memo ?? "",
+    });
+    setReservationEditorOpen(true);
+    setReservationCartOpen(true);
   }
 
   function addCustomer(event: FormEvent<HTMLFormElement>) {
@@ -1334,13 +1447,21 @@ export default function Home() {
       name,
       phone: customerForm.phone.trim(),
       address: customerForm.address.trim(),
+      addressDetail: customerForm.addressDetail.trim(),
       birthday: customerForm.birthday.trim(),
       memo: customerForm.memo.trim(),
     };
     const nextCustomers = [customer, ...customers];
     setCustomers(nextCustomers);
-    setReservationForm((current) => ({ ...current, customerId: customer.id }));
-    setCustomerForm({ name: "", phone: "", address: "", birthday: "", memo: "" });
+    setReservationForm((current) => ({
+      ...current,
+      customerId: customer.id,
+      customerName: customer.name,
+      customerPhone: customer.phone,
+      customerAddress: customer.address,
+      customerAddressDetail: customer.addressDetail ?? "",
+    }));
+    setCustomerForm({ name: "", phone: "", address: "", addressDetail: "", birthday: "", memo: "" });
     writeStoredData(categories, products, sales, activeCategory, dayRecords, productSort, purchases, nextCustomers, reservations);
     setNotice(`${name} 회원을 주소록에 추가했습니다.`);
   }
@@ -1352,6 +1473,10 @@ export default function Home() {
   }
 
   function deleteCustomer(customerId: string) {
+    if (reservations.some((reservation) => reservation.customerId === customerId)) {
+      setNotice("예약 이력이 있는 고객은 삭제할 수 없습니다. 예약 내역을 먼저 정리해 주세요.");
+      return;
+    }
     const nextCustomers = customers.filter((customer) => customer.id !== customerId);
     setCustomers(nextCustomers);
     if (reservationForm.customerId === customerId) setReservationForm((current) => ({ ...current, customerId: "" }));
@@ -1364,9 +1489,34 @@ export default function Home() {
       return;
     }
     const selectedCustomer = customers.find((customer) => customer.id === reservationForm.customerId);
-    if (!selectedCustomer) {
-      setNotice("예약 회원을 주소록에서 선택해 주세요.");
+    const customerName = (selectedCustomer?.name ?? reservationForm.customerName).trim();
+    const customerPhone = (selectedCustomer?.phone ?? reservationForm.customerPhone).trim();
+    const customerAddress = (selectedCustomer?.address ?? reservationForm.customerAddress).trim();
+    const customerAddressDetail = (selectedCustomer?.addressDetail ?? reservationForm.customerAddressDetail).trim();
+    if (!customerName || !customerPhone) {
+      setNotice("예약 고객 이름과 연락처를 입력해 주세요.");
       return;
+    }
+    let nextCustomers = customers;
+    let customerId = selectedCustomer?.id ?? "";
+    if (!customerId) {
+      const duplicate = customers.find((customer) => customer.phone && customer.phone === customerPhone);
+      if (duplicate) {
+        customerId = duplicate.id;
+      } else {
+        const customer: Customer = {
+          id: makeId("customer"),
+          name: customerName,
+          phone: customerPhone,
+          address: customerAddress,
+          addressDetail: customerAddressDetail,
+          birthday: "",
+          memo: "",
+        };
+        customerId = customer.id;
+        nextCustomers = [customer, ...customers];
+        setCustomers(nextCustomers);
+      }
     }
     const lines: DayRecordLine[] = reservationCartLines.map((item) => ({
       id: makeId("reservation-line"),
@@ -1379,26 +1529,33 @@ export default function Home() {
       paymentMethod: reservationPaymentMethod,
     }));
     const reservation: Reservation = {
-      id: makeId("reservation"),
+      id: editingReservationId || makeId("reservation"),
       date: selectedReservationDate,
-      customerId: selectedCustomer.id,
-      customerName: selectedCustomer.name,
-      customerPhone: selectedCustomer.phone,
-      customerAddress: selectedCustomer.address,
+      customerId,
+      customerName,
+      customerPhone,
+      customerAddress,
+      customerAddressDetail,
+      deliveryTime: reservationForm.deliveryTime,
       memo: reservationForm.memo.trim(),
       paymentMethod: reservationPaymentMethod,
+      paymentStatus: reservationForm.paymentStatus,
+      status: reservationForm.status,
       lines,
       total: lines.reduce((sum, line) => sum + line.total, 0),
+      completedAt: reservationForm.status === "done" ? new Date().toISOString() : undefined,
     };
-    const nextReservations = [reservation, ...reservations];
+    const nextReservations = editingReservationId
+      ? reservations.map((entry) => (entry.id === editingReservationId ? { ...reservation, completedAt: entry.completedAt ?? reservation.completedAt } : entry))
+      : [reservation, ...reservations];
     setReservations(nextReservations);
-    setReservationCart([]);
-    setReservationForm((current) => ({ ...current, memo: "" }));
-    writeStoredData(categories, products, sales, activeCategory, dayRecords, productSort, purchases, customers, nextReservations);
-    setNotice(`${selectedReservationDate} 예약을 저장했습니다.`);
+    resetReservationForm(selectedReservationDate);
+    writeStoredData(categories, products, sales, activeCategory, dayRecords, productSort, purchases, nextCustomers, nextReservations);
+    setNotice(`${selectedReservationDate} 예약을 ${editingReservationId ? "수정" : "저장"}했습니다.`);
   }
 
   function deleteReservation(reservationId: string) {
+    if (!window.confirm("선택한 예약을 삭제하시겠습니까? 삭제한 데이터는 복구할 수 없습니다.")) return;
     const nextReservations = reservations.filter((reservation) => reservation.id !== reservationId);
     setReservations(nextReservations);
     writeStoredData(categories, products, sales, activeCategory, dayRecords, productSort, purchases, customers, nextReservations);
@@ -1416,7 +1573,7 @@ export default function Home() {
       total: reservation.total,
     };
     const nextSales = [sale, ...sales];
-    const nextReservations = reservations.map((entry) => (entry.id === reservationId ? { ...entry, completedAt: sale.soldAt } : entry));
+    const nextReservations = reservations.map((entry) => (entry.id === reservationId ? { ...entry, status: "done" as ReservationStatus, completedAt: sale.soldAt } : entry));
     setSales(nextSales);
     setReservations(nextReservations);
     writeStoredData(categories, products, nextSales, activeCategory, dayRecords, productSort, purchases, customers, nextReservations);
@@ -1424,6 +1581,50 @@ export default function Home() {
   }
 
   function exportSales() {
+    if (activeView === "reservation") {
+      const rows: Array<Array<string | number>> = [
+        ["예약/배송 관리"],
+        ["예약일", "배송시간", "고객명", "연락처", "주소", "상세주소", "상품", "결제수단", "결제상태", "예약상태", "금액", "특이사항"],
+      ];
+      selectedReservationMonthItems
+        .slice()
+        .sort((a, b) => a.date.localeCompare(b.date))
+        .forEach((reservation) => {
+          rows.push([
+            reservation.date,
+            reservation.deliveryTime ?? "",
+            reservation.customerName,
+            reservation.customerPhone,
+            reservation.customerAddress,
+            reservation.customerAddressDetail ?? "",
+            reservation.lines.map((line) => `${line.name} ${line.quantity}개`).join(", "),
+            paymentLabels[reservation.paymentMethod],
+            reservationPaymentStatusLabels[reservation.paymentStatus ?? "paid"],
+            reservationStatusLabels[reservation.status ?? (reservation.completedAt ? "done" : "reserved")],
+            reservation.total,
+            reservation.memo,
+          ]);
+        });
+      rows.push([]);
+      rows.push(["고객 리스트"]);
+      rows.push(["이름", "연락처", "주소", "상세주소", "생일", "특이사항", "예약건수", "누적금액", "최근예약일"]);
+      customers.forEach((customer) => {
+        const customerReservations = reservations.filter((reservation) => reservation.customerId === customer.id);
+        rows.push([
+          customer.name,
+          customer.phone,
+          customer.address,
+          customer.addressDetail ?? "",
+          customer.birthday ?? "",
+          customer.memo ?? "",
+          customerReservations.length,
+          customerReservations.reduce((sum, reservation) => sum + reservation.total, 0),
+          customerReservations.map((reservation) => reservation.date).sort().at(-1) ?? "",
+        ]);
+      });
+      downloadExcel(`예약배송관리_${reservationMonth}.xls`, rows);
+      return;
+    }
     const rows: Array<Array<string | number>> = [["판매 집계"], ["구분", "기간", "결제수단", "상품명", "카테고리", "판매수량", "판매금액"]];
     const grouped = new Map<string, { scope: string; period: string; method: PaymentMethod; line: SaleLine }>();
     activeSales.forEach((sale) => {
@@ -1565,7 +1766,7 @@ export default function Home() {
             <strong>{activeView === "reservation" ? money(selectedReservationMonthTotal) : activeView === "purchase" ? money(todayPurchaseTotal) : money(todayTotal)}</strong>
             <small>
               {activeView === "reservation"
-                ? `${selectedReservationMonthItems.length}건`
+                ? `카드 ${money(selectedReservationMonthCardTotal)} · 현금 ${money(selectedReservationMonthCashTotal)} · 이체 ${money(selectedReservationMonthTransferTotal)} · 미결제 ${money(selectedReservationMonthUnpaidTotal)}`
                 : activeView === "purchase"
                   ? `카드 ${money(todayPurchaseCardTotal)} · 현금 ${money(todayPurchaseCashTotal)} · 이체 ${money(todayPurchaseTransferTotal)}`
                   : `카드 ${money(todayCardTotal)} · 현금 ${money(todayCashTotal)} · 이체 ${money(todayTransferTotal)}`}
@@ -2570,14 +2771,29 @@ export default function Home() {
       ) : null}
 
       {activeView === "reservation" ? (
-        <section className="management-grid reservation-page">
-          <div className="settlement-panel">
+        <section className="reservation-page">
+          <section className="reservation-board">
+            <div className="settlement-panel reservation-calendar-panel">
             <div className="panel-head">
               <div>
-                <p className="eyebrow">Reservation</p>
-                <h2>예약·배송 달력</h2>
+                <p className="eyebrow">Order</p>
+                <h2>예약/배송</h2>
               </div>
-              <input aria-label="예약 월" type="month" value={reservationMonth} onChange={(event) => changeReservationMonth(event.target.value)} />
+              <div className="reservation-tools">
+                <select aria-label="지점 선택">
+                  <option>오늘자순</option>
+                  <option>예약 많은 순</option>
+                  <option>배송완료 우선</option>
+                </select>
+                <strong>{reservationMonth} ★예약 {selectedReservationMonthItems.length}건</strong>
+                <input aria-label="예약 월" type="month" value={reservationMonth} onChange={(event) => changeReservationMonth(event.target.value)} />
+              </div>
+            </div>
+            <div className="reservation-status-guide">
+              <span className="status-red">★예약</span>
+              <span>→ 예약중</span>
+              <span className="status-dark">★배완</span>
+              <span>→ 배송완료</span>
             </div>
             <div className="calendar-weekdays">
               {["일", "월", "화", "수", "목", "금", "토"].map((day) => (
@@ -2596,22 +2812,33 @@ export default function Home() {
                     type="button"
                   >
                     <span>{cell.day}</span>
+                    <small>{weekdayFormatter.format(new Date(`${cell.key}T00:00:00`))}</small>
                     <strong>{cell.count ? `★예약 ${cell.count}건` : ""}</strong>
                     {cell.reservations.slice(0, 5).map((reservation, index) => (
-                      <em className={reservation.completedAt ? "reservation-done" : "reservation-line-mark"} key={`reservation-mark-${reservation.id}`}>
+                      <em
+                        className={reservation.completedAt || reservation.status === "done" ? "reservation-done" : "reservation-line-mark"}
+                        key={`reservation-mark-${reservation.id}`}
+                        onDoubleClick={(event) => {
+                          event.stopPropagation();
+                          editReservation(reservation);
+                        }}
+                      >
                         {index + 1}.주문: {reservation.customerName}
                       </em>
                     ))}
+                    {cell.count > 5 ? <em className="reservation-more">+{cell.count - 5}건 더보기</em> : null}
                     {cell.total ? <small>{money(cell.total)}</small> : null}
                   </button>
                 ),
               )}
             </div>
-            <div className="day-editor">
+            </div>
+
+            <aside className="cart-panel reservation-order-panel">
               <div className="day-editor-head">
                 <div>
-                  <p className="eyebrow">Reservation Edit</p>
-                  <h3>{selectedReservationDate} 예약 입력</h3>
+                  <p className="eyebrow">Cart</p>
+                  <h3>예약 주문 현황</h3>
                   <small>예약 {selectedReservationItems.length}건 · 합계 {money(selectedReservationItems.reduce((sum, item) => sum + item.total, 0))}</small>
                 </div>
                 <button className="collapse-button" onClick={() => setReservationEditorOpen((open) => !open)} type="button">
@@ -2619,11 +2846,21 @@ export default function Home() {
                 </button>
               </div>
               {reservationEditorOpen ? (
-              <div className="day-edit-workspace">
-                <section>
+                <div className="reservation-form-card">
                   <label className="day-note-field">
-                    회원 선택
-                    <select value={reservationForm.customerId} onChange={(event) => setReservationForm({ ...reservationForm, customerId: event.target.value })}>
+                    배송날짜
+                    <input
+                      type="date"
+                      value={selectedReservationDate}
+                      onChange={(event) => {
+                        setSelectedReservationDate(event.target.value);
+                        setReservationMonth(event.target.value.slice(0, 7));
+                      }}
+                    />
+                  </label>
+                  <label className="day-note-field">
+                    고객 선택
+                    <select value={reservationForm.customerId} onChange={(event) => applyCustomerToReservation(event.target.value)}>
                       <option value="">회원 선택</option>
                       {customers.map((customer) => (
                         <option key={customer.id} value={customer.id}>
@@ -2632,6 +2869,11 @@ export default function Home() {
                       ))}
                     </select>
                   </label>
+                  <input placeholder="1.이름" value={reservationForm.customerName} onChange={(event) => setReservationForm({ ...reservationForm, customerName: event.target.value, customerId: "" })} />
+                  <input placeholder="2.연락처" value={reservationForm.customerPhone} onChange={(event) => setReservationForm({ ...reservationForm, customerPhone: event.target.value, customerId: "" })} />
+                  <input placeholder="3.배송지 주소" value={reservationForm.customerAddress} onChange={(event) => setReservationForm({ ...reservationForm, customerAddress: event.target.value, customerId: "" })} />
+                  <input placeholder="4.상세주소" value={reservationForm.customerAddressDetail} onChange={(event) => setReservationForm({ ...reservationForm, customerAddressDetail: event.target.value, customerId: "" })} />
+                  <input placeholder="5.배송시간 예: 오후3시" value={reservationForm.deliveryTime} onChange={(event) => setReservationForm({ ...reservationForm, deliveryTime: event.target.value })} />
                   <div className="category-tabs compact-tabs" aria-label="예약 카테고리 필터">
                     <button className={reservationCategory === "all" ? "active" : ""} onClick={() => setReservationCategory("all")} type="button">
                       전체
@@ -2648,23 +2890,8 @@ export default function Home() {
                       </button>
                     ))}
                   </div>
-                  <div className="day-product-grid">
-                    {visibleReservationProducts.map((product) => {
-                      const category = categoryMap.get(product.categoryId);
-                      return (
-                        <button className="day-product-tile" key={product.id} onClick={() => addToReservationCart(product.id)} type="button">
-                          <span className="swatch" style={{ background: category?.color }} />
-                          <strong>{product.name}</strong>
-                          <small>{category?.name ?? "미분류"}</small>
-                          <b>{money(product.price)}</b>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </section>
-                <section className="day-edit-cart">
                   <div className="day-edit-cart-head">
-                    <strong>예약 품목</strong>
+                    <strong>상품</strong>
                     <div className="button-pair">
                       <button className="collapse-button" onClick={() => setReservationCartOpen((open) => !open)} type="button">
                         {reservationCartOpen ? "접기" : "펼치기"}
@@ -2676,36 +2903,50 @@ export default function Home() {
                   </div>
                   {reservationCartOpen ? (
                     <>
-                  <div className="day-edit-lines">
-                    {reservationCartLines.length === 0 ? (
-                      <p className="empty small-empty">예약할 상품을 선택하세요.</p>
-                    ) : (
-                      reservationCartLines.map((item) => (
-                        <div className="cart-line" key={item!.product.id}>
-                          <div>
-                            <strong>{item!.product.name}</strong>
-                            <span>{money(item!.product.price)}</span>
-                          </div>
-                          <div className="stepper">
-                            <button onClick={() => changeReservationQuantity(item!.product.id, item!.quantity - 1)} type="button">
-                              -
+                      <div className="reservation-product-picker">
+                        {visibleReservationProducts.map((product) => {
+                          const category = categoryMap.get(product.categoryId);
+                          return (
+                            <button key={product.id} onClick={() => addToReservationCart(product.id)} type="button">
+                              <span className="swatch" style={{ background: category?.color }} />
+                              <strong>{product.name}</strong>
+                              <small>{money(product.price)}</small>
                             </button>
-                            <input
-                              aria-label={`${item!.product.name} 예약 수량`}
-                              min="1"
-                              onChange={(event) => changeReservationQuantity(item!.product.id, Number(event.target.value))}
-                              type="number"
-                              value={item!.quantity}
-                            />
-                            <button onClick={() => changeReservationQuantity(item!.product.id, item!.quantity + 1)} type="button">
-                              +
-                            </button>
-                          </div>
-                          <b>{money(item!.total)}</b>
-                        </div>
-                      ))
-                    )}
-                  </div>
+                          );
+                        })}
+                      </div>
+                      <div className="day-edit-lines">
+                        {reservationCartLines.length === 0 ? (
+                          <p className="empty small-empty">예약할 상품을 선택하세요.</p>
+                        ) : (
+                          reservationCartLines.map((item) => (
+                            <div className="cart-line" key={item!.product.id}>
+                              <div>
+                                <strong>{item!.product.name}</strong>
+                                <span>{money(item!.product.price)}</span>
+                              </div>
+                              <div className="stepper">
+                                <button onClick={() => changeReservationQuantity(item!.product.id, item!.quantity - 1)} type="button">
+                                  -
+                                </button>
+                                <input
+                                  aria-label={`${item!.product.name} 예약 수량`}
+                                  min="1"
+                                  onChange={(event) => changeReservationQuantity(item!.product.id, Number(event.target.value))}
+                                  type="number"
+                                  value={item!.quantity}
+                                />
+                                <button onClick={() => changeReservationQuantity(item!.product.id, item!.quantity + 1)} type="button">
+                                  +
+                                </button>
+                              </div>
+                              <b>{money(item!.total)}</b>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    </>
+                  ) : null}
                   <div className="payment-toggle" aria-label="예약 결제수단 선택">
                     <button className={reservationPaymentMethod === "card" ? "active" : ""} onClick={() => setReservationPaymentMethod("card")} type="button">
                       카드
@@ -2717,8 +2958,24 @@ export default function Home() {
                       이체
                     </button>
                   </div>
+                  <div className="reservation-two-col">
+                    <select value={reservationForm.paymentStatus} onChange={(event) => setReservationForm({ ...reservationForm, paymentStatus: event.target.value as ReservationPaymentStatus })}>
+                      {Object.entries(reservationPaymentStatusLabels).map(([value, label]) => (
+                        <option key={value} value={value}>
+                          {label}
+                        </option>
+                      ))}
+                    </select>
+                    <select value={reservationForm.status} onChange={(event) => setReservationForm({ ...reservationForm, status: event.target.value as ReservationStatus })}>
+                      {Object.entries(reservationStatusLabels).map(([value, label]) => (
+                        <option key={value} value={value}>
+                          {label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
                   <textarea
-                    placeholder="배송/예약 메모"
+                    placeholder="6.특이사항"
                     value={reservationForm.memo}
                     onChange={(event) => setReservationForm({ ...reservationForm, memo: event.target.value })}
                   />
@@ -2726,45 +2983,75 @@ export default function Home() {
                     <span>예약 합계</span>
                     <strong>{money(reservationCartTotal)}</strong>
                   </div>
-                  <button className="primary-button" onClick={saveReservation} type="button">
-                    예약 저장
-                  </button>
-                    </>
-                  ) : null}
-                </section>
-              </div>
-              ) : (
-                <p className="empty small-empty reservation-prompt">달력에서 날짜를 누르면 카테고리와 예약 품목 선택창이 열립니다.</p>
-              )}
-              <div className="day-record-lines">
-                <div className="day-record-lines-head">
-                  <strong>선택 날짜 예약</strong>
+                  <div className="reservation-actions">
+                    <button className="primary-button" onClick={saveReservation} type="button">
+                      {editingReservationId ? "수정완료" : "입력완료"}
+                    </button>
+                    <button className="ghost-button" onClick={() => resetReservationForm()} type="button">
+                      초기화
+                    </button>
+                  </div>
                 </div>
-                {selectedReservationItems.length === 0 ? (
-                  <p className="empty small-empty">선택한 날짜의 예약이 없습니다.</p>
+              ) : (
+                <p className="empty small-empty reservation-prompt">달력에서 날짜를 누르면 예약 입력창이 열립니다.</p>
+              )}
+              <div className="day-record-lines reservation-history">
+                <div className="day-record-lines-head">
+                  <strong>최근입력내역</strong>
+                </div>
+                {reservations.length === 0 ? (
+                  <p className="empty small-empty">최근 입력 내역이 없습니다.</p>
                 ) : (
-                  selectedReservationItems.map((reservation) => (
-                    <div key={reservation.id}>
+                  reservations.slice(0, 10).map((reservation) => (
+                    <div key={`recent-${reservation.id}`} onClick={() => editReservation(reservation)} role="button" tabIndex={0}>
                       <span>
                         {reservation.customerName} · {reservation.lines.map((line) => `${line.name} ${line.quantity}개`).join(", ")}
                       </span>
                       <small>
-                        {paymentLabels[reservation.paymentMethod]} · {money(reservation.total)} · {reservation.customerAddress}
+                        {reservation.date} · {reservationStatusLabels[reservation.status ?? (reservation.completedAt ? "done" : "reserved")]} · {money(reservation.total)}
                       </small>
-                      {reservation.completedAt ? (
-                        <b className="sale-status">완료</b>
-                      ) : (
-                        <button onClick={() => completeReservation(reservation.id)} type="button">
-                          계산 완료
-                        </button>
-                      )}
-                      <button onClick={() => deleteReservation(reservation.id)} type="button">
-                        삭제
-                      </button>
                     </div>
                   ))
                 )}
               </div>
+            </aside>
+          </section>
+
+          <div className="manage-panel reservation-selected-list">
+            <div className="day-record-lines">
+              <div className="day-record-lines-head">
+                <strong>{selectedReservationDate} 예약 목록</strong>
+                <button className="collapse-button" onClick={() => resetReservationForm(selectedReservationDate)} type="button">
+                  새 예약
+                </button>
+              </div>
+              {selectedReservationItems.length === 0 ? (
+                <p className="empty small-empty">선택한 날짜의 예약이 없습니다.</p>
+              ) : (
+                selectedReservationItems.map((reservation) => (
+                  <div key={reservation.id}>
+                    <span>
+                      {reservation.customerName} · {reservation.lines.map((line) => `${line.name} ${line.quantity}개`).join(", ")}
+                    </span>
+                    <small>
+                      {paymentLabels[reservation.paymentMethod]} · {reservationPaymentStatusLabels[reservation.paymentStatus ?? "paid"]} · {reservationStatusLabels[reservation.status ?? (reservation.completedAt ? "done" : "reserved")]} · {money(reservation.total)} · {reservation.customerAddress}
+                    </small>
+                    {reservation.completedAt || reservation.status === "done" ? (
+                      <b className="sale-status">완료</b>
+                    ) : (
+                      <button onClick={() => completeReservation(reservation.id)} type="button">
+                        계산 완료
+                      </button>
+                    )}
+                    <button onClick={() => editReservation(reservation)} type="button">
+                      수정
+                    </button>
+                    <button onClick={() => deleteReservation(reservation.id)} type="button">
+                      삭제
+                    </button>
+                  </div>
+                ))
+              )}
             </div>
           </div>
 
@@ -2772,7 +3059,7 @@ export default function Home() {
             <div className="panel-head">
               <div>
                 <p className="eyebrow">Rank</p>
-                <h2>예약 순위</h2>
+                <h2>예약순위</h2>
               </div>
             </div>
             <div className="rank-columns">
@@ -2799,42 +3086,75 @@ export default function Home() {
             </div>
           </div>
 
-          <div className="manage-panel">
-            <div className="panel-head">
-              <div>
-                <p className="eyebrow">Address Book</p>
-                <h2>회원 주소록</h2>
+          <section className="customer-management">
+            <div className="manage-panel customer-list-panel">
+              <div className="panel-head">
+                <div>
+                  <p className="eyebrow">Rank</p>
+                  <h2>고객리스트</h2>
+                </div>
+                <input placeholder="고객검색" value={customerSearch} onChange={(event) => setCustomerSearch(event.target.value)} />
+              </div>
+              <div className="customer-table">
+                <div className="customer-row customer-head">
+                  <span>번호</span>
+                  <span>이름</span>
+                  <span>연락처</span>
+                  <span>주소</span>
+                  <span>생일</span>
+                  <span>특이사항</span>
+                  <span>누적</span>
+                  <span>관리</span>
+                </div>
+                {filteredCustomers.length === 0 ? (
+                  <p className="empty small-empty">등록된 고객이 없습니다.</p>
+                ) : (
+                  filteredCustomers.map((customer, index) => {
+                    const customerReservations = reservations.filter((reservation) => reservation.customerId === customer.id);
+                    return (
+                      <div className="customer-row" key={customer.id}>
+                        <span>{index + 1}</span>
+                        <input aria-label={`${customer.name} 이름`} value={customer.name} onChange={(event) => updateCustomer(customer.id, "name", event.target.value)} />
+                        <input aria-label={`${customer.name} 연락처`} value={customer.phone} onChange={(event) => updateCustomer(customer.id, "phone", event.target.value)} />
+                        <input aria-label={`${customer.name} 주소`} value={customer.address} onChange={(event) => updateCustomer(customer.id, "address", event.target.value)} />
+                        <input aria-label={`${customer.name} 생일`} value={customer.birthday ?? ""} onChange={(event) => updateCustomer(customer.id, "birthday", event.target.value)} />
+                        <input aria-label={`${customer.name} 특이사항`} value={customer.memo ?? ""} onChange={(event) => updateCustomer(customer.id, "memo", event.target.value)} />
+                        <small>{customerReservations.length}건 · {money(customerReservations.reduce((sum, reservation) => sum + reservation.total, 0))}</small>
+                        <div className="button-pair">
+                          <button className="text-button" onClick={() => applyCustomerToReservation(customer.id)} type="button">
+                            예약
+                          </button>
+                          <button className="text-button danger-text" onClick={() => deleteCustomer(customer.id)} type="button">
+                            삭제
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
               </div>
             </div>
-            <form className="form-grid address-form" onSubmit={addCustomer}>
-              <input placeholder="회원명" value={customerForm.name} onChange={(event) => setCustomerForm({ ...customerForm, name: event.target.value })} />
-              <input placeholder="연락처" value={customerForm.phone} onChange={(event) => setCustomerForm({ ...customerForm, phone: event.target.value })} />
-              <input placeholder="주소" value={customerForm.address} onChange={(event) => setCustomerForm({ ...customerForm, address: event.target.value })} />
-              <input placeholder="생일" value={customerForm.birthday} onChange={(event) => setCustomerForm({ ...customerForm, birthday: event.target.value })} />
-              <input placeholder="특이사항" value={customerForm.memo} onChange={(event) => setCustomerForm({ ...customerForm, memo: event.target.value })} />
-              <button className="primary-button" type="submit">
-                입력완료
-              </button>
-            </form>
-            <div className="category-list address-list">
-              {customers.length === 0 ? (
-                <p className="empty small-empty">등록된 회원이 없습니다.</p>
-              ) : (
-                customers.map((customer) => (
-                  <div key={customer.id}>
-                    <input aria-label={`${customer.name} 이름`} value={customer.name} onChange={(event) => updateCustomer(customer.id, "name", event.target.value)} />
-                    <input aria-label={`${customer.name} 연락처`} value={customer.phone} onChange={(event) => updateCustomer(customer.id, "phone", event.target.value)} />
-                    <input aria-label={`${customer.name} 주소`} value={customer.address} onChange={(event) => updateCustomer(customer.id, "address", event.target.value)} />
-                    <input aria-label={`${customer.name} 생일`} value={customer.birthday ?? ""} onChange={(event) => updateCustomer(customer.id, "birthday", event.target.value)} />
-                    <input aria-label={`${customer.name} 특이사항`} value={customer.memo ?? ""} onChange={(event) => updateCustomer(customer.id, "memo", event.target.value)} />
-                    <button onClick={() => deleteCustomer(customer.id)} type="button">
-                      삭제
-                    </button>
-                  </div>
-                ))
-              )}
+
+            <div className="manage-panel customer-form-panel">
+              <div className="panel-head">
+                <div>
+                  <p className="eyebrow">Customer</p>
+                  <h2>고객정보입력란</h2>
+                </div>
+              </div>
+              <form className="customer-input-form" onSubmit={addCustomer}>
+                <input placeholder="1.이름" value={customerForm.name} onChange={(event) => setCustomerForm({ ...customerForm, name: event.target.value })} />
+                <input placeholder="2.연락처" value={customerForm.phone} onChange={(event) => setCustomerForm({ ...customerForm, phone: event.target.value })} />
+                <input placeholder="3.주소" value={customerForm.address} onChange={(event) => setCustomerForm({ ...customerForm, address: event.target.value })} />
+                <input placeholder="4.상세주소" value={customerForm.addressDetail} onChange={(event) => setCustomerForm({ ...customerForm, addressDetail: event.target.value })} />
+                <input placeholder="5.생일" value={customerForm.birthday} onChange={(event) => setCustomerForm({ ...customerForm, birthday: event.target.value })} />
+                <textarea placeholder="6.특이사항" value={customerForm.memo} onChange={(event) => setCustomerForm({ ...customerForm, memo: event.target.value })} />
+                <button className="primary-button" type="submit">
+                  입력완료
+                </button>
+              </form>
             </div>
-          </div>
+          </section>
         </section>
       ) : null}
     </main>

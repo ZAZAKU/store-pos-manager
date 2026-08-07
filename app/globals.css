@@ -695,15 +695,190 @@ textarea {
 }
 
 .reservation-page {
-  grid-template-columns: minmax(0, 2fr) minmax(320px, 1fr);
+  display: grid;
+  gap: 18px;
 }
 
-.reservation-page .settlement-panel {
-  grid-column: auto;
+.reservation-board {
+  display: grid;
+  grid-template-columns: minmax(0, 2.4fr) minmax(330px, 0.9fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.reservation-calendar-panel,
+.reservation-order-panel,
+.customer-management .manage-panel,
+.reservation-selected-list {
+  background: #ffffff;
+}
+
+.reservation-tools {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.reservation-tools strong {
+  min-height: 34px;
+  padding: 8px 14px;
+  border-radius: 8px;
+  background: #dff3fb;
+  color: #0ea5e9;
+}
+
+.reservation-tools select,
+.reservation-tools input {
+  max-width: 160px;
+}
+
+.reservation-status-guide {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 12px;
+  padding: 14px;
+  border-radius: 8px;
+  background: #e9f6ee;
+  color: var(--muted);
+  font-weight: 900;
+}
+
+.status-red {
+  color: #ef4444;
+}
+
+.status-dark {
+  color: #111827;
+}
+
+.reservation-order-panel {
+  position: sticky;
+  top: 18px;
+  display: grid;
+  gap: 12px;
+  max-height: calc(100vh - 36px);
+  overflow: auto;
+}
+
+.reservation-form-card {
+  display: grid;
+  gap: 10px;
+  padding: 18px;
+  border: 2px dashed #c8cfd8;
+  border-radius: 8px;
+}
+
+.reservation-form-card input,
+.reservation-form-card select,
+.reservation-form-card textarea,
+.customer-input-form input,
+.customer-input-form textarea,
+.customer-table input,
+.customer-list-panel .panel-head input {
+  min-height: 38px;
+}
+
+.reservation-product-picker {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+  gap: 8px;
+  max-height: 176px;
+  overflow: auto;
+}
+
+.reservation-product-picker button {
+  display: grid;
+  gap: 4px;
+  min-height: 82px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #ffffff;
+  text-align: left;
+}
+
+.reservation-product-picker button:hover {
+  border-color: var(--teal);
+}
+
+.reservation-two-col,
+.reservation-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.reservation-history {
+  max-height: 220px;
+  overflow: auto;
+}
+
+.reservation-history > div:not(.day-record-lines-head) {
+  cursor: pointer;
+}
+
+.reservation-selected-list .day-record-lines {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.customer-management {
+  display: grid;
+  grid-template-columns: minmax(0, 1.45fr) minmax(320px, 0.8fr);
+  gap: 18px;
+}
+
+.customer-table {
+  display: grid;
+  gap: 6px;
+  overflow: auto;
+}
+
+.customer-row {
+  display: grid;
+  grid-template-columns: 42px minmax(86px, 1fr) minmax(118px, 1fr) minmax(150px, 1.3fr) minmax(90px, 0.8fr) minmax(120px, 1fr) minmax(110px, auto) minmax(120px, auto);
+  gap: 6px;
+  align-items: center;
+  min-width: 900px;
+  padding: 7px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.customer-head {
+  background: #f8fafc;
+  color: var(--ink);
+  font-weight: 900;
+}
+
+.customer-row small {
+  color: var(--muted);
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.customer-input-form {
+  display: grid;
+  gap: 12px;
+  padding: 18px;
+  border: 2px dashed #c8cfd8;
+  border-radius: 8px;
+}
+
+.customer-input-form textarea {
+  min-height: 124px;
+}
+
+.danger-text {
+  color: var(--danger);
 }
 
 .reservation-page .day-record-lines > div:not(.day-record-lines-head) {
-  grid-template-columns: minmax(0, 1fr) minmax(120px, auto) auto auto;
+  grid-template-columns: minmax(0, 1fr) minmax(130px, auto) auto auto auto;
 }
 
 .purchase-tile {
@@ -1044,7 +1219,9 @@ textarea {
 @media (max-width: 1100px) {
   .topbar,
   .workspace,
-  .management-grid {
+  .management-grid,
+  .reservation-board,
+  .customer-management {
     grid-template-columns: 1fr;
   }
 
@@ -1058,6 +1235,11 @@ textarea {
 
   .cart-panel {
     position: static;
+  }
+
+  .reservation-order-panel {
+    position: static;
+    max-height: none;
   }
 
   .rank-columns {
@@ -1086,6 +1268,8 @@ textarea {
 
   .summary-strip,
   .payment-toggle,
+  .reservation-two-col,
+  .reservation-actions,
   .form-grid,
   .inline-form,
   .address-form,
@@ -1107,9 +1291,17 @@ textarea {
   }
 
   .notice,
-  .settlement-panel input {
+  .settlement-panel input,
+  .reservation-tools select,
+  .reservation-tools input {
     max-width: none;
     width: 100%;
+  }
+
+  .reservation-tools,
+  .reservation-status-guide {
+    align-items: stretch;
+    flex-direction: column;
   }
 
   .product-grid {
