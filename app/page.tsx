@@ -1572,8 +1572,13 @@ export default function Home() {
             </small>
           </div>
           <div>
-            <span>{activeView === "reservation" ? "고객수" : "등록 상품"}</span>
-            <strong>{activeView === "reservation" ? `${customers.length}개` : `${products.length}개`}</strong>
+            <span>{activeView === "reservation" ? "고객수" : activeView === "purchase" ? "선택 월 매입" : "등록 상품"}</span>
+            <strong>{activeView === "reservation" ? `${customers.length}개` : activeView === "purchase" ? money(selectedPurchaseMonthTotal) : `${products.length}개`}</strong>
+            {activeView === "purchase" ? (
+              <small>
+                카드 {money(selectedPurchaseMonthCardTotal)} · 현금 {money(selectedPurchaseMonthCashTotal)} · 이체 {money(selectedPurchaseMonthTransferTotal)}
+              </small>
+            ) : null}
           </div>
           <button className="ghost-button" onClick={exportSales} type="button">
             Excel 내보내기
@@ -2239,26 +2244,6 @@ export default function Home() {
 
       {activeView === "purchase" ? (
         <section className="management-grid">
-          <div className="manage-panel">
-            <div className="panel-head">
-              <div>
-                <p className="eyebrow">Purchase Summary</p>
-                <h2>매입 요약</h2>
-              </div>
-            </div>
-            <div className="summary-strip inline-summary">
-              <div>
-                <span>오늘 매입</span>
-                <strong>{money(todayPurchaseTotal)}</strong>
-                <small>카드 {money(todayPurchaseCardTotal)} · 현금 {money(todayPurchaseCashTotal)} · 이체 {money(todayPurchaseTransferTotal)}</small>
-              </div>
-              <div>
-                <span>선택 월 매입</span>
-                <strong>{money(selectedPurchaseMonthTotal)}</strong>
-                <small>카드 {money(selectedPurchaseMonthCardTotal)} · 현금 {money(selectedPurchaseMonthCashTotal)} · 이체 {money(selectedPurchaseMonthTransferTotal)}</small>
-              </div>
-            </div>
-          </div>
           <div className="manage-panel">
             <div className="panel-head">
               <div>
