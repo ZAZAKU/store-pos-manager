@@ -1038,6 +1038,15 @@ textarea {
   background: #f0fdfa;
 }
 
+.calendar-day.reservation-all-done {
+  border-color: #cbd5e1;
+  background: #f8fafc;
+}
+
+.calendar-day.reservation-all-done strong {
+  color: #334155;
+}
+
 .calendar-day.has-note {
   border-color: #bfdbfe;
 }

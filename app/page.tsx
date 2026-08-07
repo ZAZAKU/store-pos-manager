@@ -974,7 +974,9 @@ export default function Home() {
       const key = `${reservationMonth}-${String(day).padStart(2, "0")}`;
       const dayReservations = reservations.filter((reservation) => reservation.date === key);
       const total = dayReservations.reduce((sum, reservation) => sum + reservation.total, 0);
-      return { type: "day" as const, key, day, count: dayReservations.length, total, reservations: dayReservations };
+      const allDone =
+        dayReservations.length > 0 && dayReservations.every((reservation) => Boolean(reservation.completedAt) || reservation.status === "done");
+      return { type: "day" as const, key, day, count: dayReservations.length, total, reservations: dayReservations, allDone };
     }),
   ];
   const todayRecord = dayRecordMap.get(dateKey(new Date()));
@@ -3344,9 +3346,8 @@ export default function Home() {
             </div>
             <div className="reservation-status-guide">
               <span className="status-red">★예약</span>
-              <span>→ 예약중</span>
-              <span className="status-dark">★배완</span>
-              <span>→ 배송완료</span>
+              <span>→</span>
+              <span className="status-dark">완료</span>
             </div>
             <div className="calendar-weekdays">
               {["일", "월", "화", "수", "목", "금", "토"].map((day) => (
@@ -3359,14 +3360,16 @@ export default function Home() {
                   <div className="calendar-day blank" key={cell.key} />
                 ) : (
                   <button
-                    className={["calendar-day", cell.count ? "has-sale" : "", selectedReservationDate === cell.key ? "selected" : ""].filter(Boolean).join(" ")}
+                    className={["calendar-day", cell.count ? "has-sale" : "", cell.allDone ? "reservation-all-done" : "", selectedReservationDate === cell.key ? "selected" : ""]
+                      .filter(Boolean)
+                      .join(" ")}
                     key={cell.key}
                     onClick={() => selectReservationDate(cell.key)}
                     type="button"
                   >
                     <span>{cell.day}</span>
                     <small>{weekdayFormatter.format(new Date(`${cell.key}T00:00:00`))}</small>
-                    <strong>{cell.count ? `★예약 ${cell.count}건` : ""}</strong>
+                    <strong>{cell.count ? (cell.allDone ? `완료 ${cell.count}건` : `★예약 ${cell.count}건`) : ""}</strong>
                     {cell.reservations.slice(0, 5).map((reservation, index) => (
                       <em
                         className={reservation.completedAt || reservation.status === "done" ? "reservation-done" : "reservation-line-mark"}
