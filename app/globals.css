@@ -814,8 +814,33 @@ textarea {
 .reservation-two-col,
 .reservation-actions {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
+}
+
+.reservation-two-col {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.reservation-actions {
+  grid-template-columns: repeat(auto-fit, minmax(112px, 1fr));
+}
+
+.reservation-editing-banner {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border: 1px solid #99f6e4;
+  border-radius: 8px;
+  background: #ecfdf5;
+  color: var(--ink);
+}
+
+.reservation-editing-banner span {
+  color: var(--teal);
+  font-size: 12px;
+  font-weight: 900;
 }
 
 .reservation-history {
@@ -989,6 +1014,13 @@ textarea {
   font-weight: 800;
   text-overflow: ellipsis;
   white-space: nowrap;
+  cursor: pointer;
+}
+
+.calendar-day em.reservation-line-mark:hover,
+.calendar-day em.reservation-done:hover {
+  color: var(--teal);
+  text-decoration: underline;
 }
 
 .calendar-day em.reservation-done {

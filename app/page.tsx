@@ -2060,6 +2060,7 @@ export default function Home() {
     if (!window.confirm("선택한 예약을 삭제하시겠습니까? 삭제한 데이터는 복구할 수 없습니다.")) return;
     const nextReservations = reservations.filter((reservation) => reservation.id !== reservationId);
     setReservations(nextReservations);
+    if (editingReservationId === reservationId) resetReservationForm(selectedReservationDate);
     writeStoredData(
       categories,
       products,
@@ -2075,6 +2076,29 @@ export default function Home() {
       activePurchaseCategory,
     );
     setNotice("예약을 삭제했습니다.");
+  }
+
+  function confirmReservation(reservationId: string) {
+    const reservation = reservations.find((entry) => entry.id === reservationId);
+    if (!reservation) return;
+    const nextReservations = reservations.map((entry) => (entry.id === reservationId ? { ...entry, status: "confirmed" as ReservationStatus } : entry));
+    setReservations(nextReservations);
+    setReservationForm((current) => (editingReservationId === reservationId ? { ...current, status: "confirmed" } : current));
+    writeStoredData(
+      categories,
+      products,
+      sales,
+      activeCategory,
+      dayRecords,
+      productSort,
+      purchases,
+      customers,
+      nextReservations,
+      purchaseCategories,
+      purchaseProducts,
+      activePurchaseCategory,
+    );
+    setNotice(`${reservation.customerName} 예약을 확인 처리했습니다.`);
   }
 
   function completeReservation(reservationId: string) {
@@ -3347,10 +3371,20 @@ export default function Home() {
                       <em
                         className={reservation.completedAt || reservation.status === "done" ? "reservation-done" : "reservation-line-mark"}
                         key={`reservation-mark-${reservation.id}`}
-                        onDoubleClick={(event) => {
+                        onClick={(event) => {
                           event.stopPropagation();
                           editReservation(reservation);
                         }}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter" || event.key === " ") {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            editReservation(reservation);
+                          }
+                        }}
+                        role="button"
+                        tabIndex={0}
+                        title={`${reservation.customerName} 예약을 CART에서 확인/수정`}
                       >
                         {index + 1}.주문: {reservation.customerName}
                       </em>
@@ -3415,6 +3449,12 @@ export default function Home() {
               </div>
               {reservationEditorOpen ? (
                 <div className="reservation-form-card">
+                  {editingReservationId ? (
+                    <div className="reservation-editing-banner">
+                      <strong>{reservationForm.customerName || "선택한 예약"}</strong>
+                      <span>CART에서 주문 내역 확인/수정 중</span>
+                    </div>
+                  ) : null}
                   <label className="day-note-field">
                     배송날짜
                     <input
@@ -3555,6 +3595,21 @@ export default function Home() {
                     <button className="primary-button" onClick={saveReservation} type="button">
                       {editingReservationId ? "수정완료" : "입력완료"}
                     </button>
+                    {editingReservationId ? (
+                      <button className="ghost-button" onClick={() => confirmReservation(editingReservationId)} type="button">
+                        예약확인
+                      </button>
+                    ) : null}
+                    {editingReservationId && !reservations.find((entry) => entry.id === editingReservationId)?.completedAt ? (
+                      <button className="ghost-button" onClick={() => completeReservation(editingReservationId)} type="button">
+                        계산완료
+                      </button>
+                    ) : null}
+                    {editingReservationId ? (
+                      <button className="danger-button" onClick={() => deleteReservation(editingReservationId)} type="button">
+                        삭제
+                      </button>
+                    ) : null}
                     <button className="ghost-button" onClick={() => resetReservationForm()} type="button">
                       초기화
                     </button>
