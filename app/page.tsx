@@ -2773,6 +2773,7 @@ export default function Home() {
       {activeView === "reservation" ? (
         <section className="reservation-page">
           <section className="reservation-board">
+            <div className="reservation-main-column">
             <div className="settlement-panel reservation-calendar-panel">
             <div className="panel-head">
               <div>
@@ -2831,6 +2832,45 @@ export default function Home() {
                   </button>
                 ),
               )}
+            </div>
+            </div>
+
+            <div className="manage-panel reservation-selected-list">
+              <div className="day-record-lines">
+                <div className="day-record-lines-head">
+                  <strong>{selectedReservationDate} 예약 목록</strong>
+                  <button className="collapse-button" onClick={() => resetReservationForm(selectedReservationDate)} type="button">
+                    새 예약
+                  </button>
+                </div>
+                {selectedReservationItems.length === 0 ? (
+                  <p className="empty small-empty">선택한 날짜의 예약이 없습니다.</p>
+                ) : (
+                  selectedReservationItems.map((reservation) => (
+                    <div key={reservation.id}>
+                      <span>
+                        {reservation.customerName} · {reservation.lines.map((line) => `${line.name} ${line.quantity}개`).join(", ")}
+                      </span>
+                      <small>
+                        {paymentLabels[reservation.paymentMethod]} · {reservationPaymentStatusLabels[reservation.paymentStatus ?? "paid"]} · {reservationStatusLabels[reservation.status ?? (reservation.completedAt ? "done" : "reserved")]} · {money(reservation.total)} · {reservation.customerAddress}
+                      </small>
+                      {reservation.completedAt || reservation.status === "done" ? (
+                        <b className="sale-status">완료</b>
+                      ) : (
+                        <button onClick={() => completeReservation(reservation.id)} type="button">
+                          계산 완료
+                        </button>
+                      )}
+                      <button onClick={() => editReservation(reservation)} type="button">
+                        수정
+                      </button>
+                      <button onClick={() => deleteReservation(reservation.id)} type="button">
+                        삭제
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
             </div>
             </div>
 
@@ -3016,44 +3056,6 @@ export default function Home() {
               </div>
             </aside>
           </section>
-
-          <div className="manage-panel reservation-selected-list">
-            <div className="day-record-lines">
-              <div className="day-record-lines-head">
-                <strong>{selectedReservationDate} 예약 목록</strong>
-                <button className="collapse-button" onClick={() => resetReservationForm(selectedReservationDate)} type="button">
-                  새 예약
-                </button>
-              </div>
-              {selectedReservationItems.length === 0 ? (
-                <p className="empty small-empty">선택한 날짜의 예약이 없습니다.</p>
-              ) : (
-                selectedReservationItems.map((reservation) => (
-                  <div key={reservation.id}>
-                    <span>
-                      {reservation.customerName} · {reservation.lines.map((line) => `${line.name} ${line.quantity}개`).join(", ")}
-                    </span>
-                    <small>
-                      {paymentLabels[reservation.paymentMethod]} · {reservationPaymentStatusLabels[reservation.paymentStatus ?? "paid"]} · {reservationStatusLabels[reservation.status ?? (reservation.completedAt ? "done" : "reserved")]} · {money(reservation.total)} · {reservation.customerAddress}
-                    </small>
-                    {reservation.completedAt || reservation.status === "done" ? (
-                      <b className="sale-status">완료</b>
-                    ) : (
-                      <button onClick={() => completeReservation(reservation.id)} type="button">
-                        계산 완료
-                      </button>
-                    )}
-                    <button onClick={() => editReservation(reservation)} type="button">
-                      수정
-                    </button>
-                    <button onClick={() => deleteReservation(reservation.id)} type="button">
-                      삭제
-                    </button>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
 
           <div className="manage-panel rank-panel">
             <div className="panel-head">

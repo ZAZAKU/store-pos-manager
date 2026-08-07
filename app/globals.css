@@ -701,9 +701,15 @@ textarea {
 
 .reservation-board {
   display: grid;
-  grid-template-columns: minmax(0, 2.4fr) minmax(330px, 0.9fr);
+  grid-template-columns: minmax(0, 1.65fr) minmax(460px, 0.95fr);
   gap: 18px;
   align-items: start;
+}
+
+.reservation-main-column {
+  display: grid;
+  gap: 18px;
+  min-width: 0;
 }
 
 .reservation-calendar-panel,
@@ -759,6 +765,7 @@ textarea {
   top: 18px;
   display: grid;
   gap: 12px;
+  min-width: 0;
   max-height: calc(100vh - 36px);
   overflow: auto;
 }
